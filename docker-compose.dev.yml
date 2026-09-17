@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: sansa
       POSTGRES_DB: sansa
     ports:
-      - "5432:5432"
+      - "15432:5432"
     volumes:
       - sansa_pgdata:/var/lib/postgresql/data
     healthcheck:
