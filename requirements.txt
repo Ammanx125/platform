@@ -1,0 +1,48 @@
+# --- Core Framework & Server ---
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# --- Database & Migrations ---
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pgvector
+
+# --- Auth, Security & Crypto ---
+pwdlib[argon2]
+PyJWT
+cryptography
+
+# --- Utilities & HTTP Client ---
+httpx
+tenacity
+python-multipart
+slowapi
+
+# --- Web & Frontend Templates ---
+jinja2
+
+# --- Data Processing & Ingestion ---
+pandas
+openpyxl
+pypdf
+
+# --- ML & Analytics ---
+scikit-learn
+statsmodels
+numpy
+
+# --- Observability & Logging ---
+structlog
+prometheus-client
+
+# --- Testing ---
+pytest
+pytest-asyncio
+
+# --- Code Quality & Static Analysis ---
+ruff
+mypy
+pre-commit
