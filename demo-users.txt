@@ -1,0 +1,5 @@
+.\.venv\Scripts\python.exe -m scripts.create_admin `
+  --tenant-name "Demo" `
+  --tenant-slug "demo" `
+  --admin-email "admin@demo.com" `
+  --admin-password "Sansa2026"

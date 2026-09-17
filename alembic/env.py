@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from app.core.config import settings
 from app.db.base import Base
 
-# Import models here as they are created, so autogenerate sees them.
+from app.db import models  # noqa: F401  — registers all models with Base.metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

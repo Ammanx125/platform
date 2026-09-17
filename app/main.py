@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.api.v1 import api_router
 
 app = FastAPI(title=settings.app_name)
 
+app.include_router(api_router)
 
 @app.get("/health")
 async def health() -> dict[str, str]:

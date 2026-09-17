@@ -1,4 +1,6 @@
 # app/core/config.py
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +25,17 @@ class Settings(BaseSettings):
     db_max_overflow: int = 20
     db_pool_timeout: int = 30
     db_echo: bool = False
+
+    # Auth cookies
+    access_cookie_name: str = "sansa_access"
+    refresh_cookie_name: str = "sansa_refresh"
+    csrf_cookie_name: str = "sansa_csrf"
+    cookie_domain: str | None = None
+    cookie_secure: bool = False          # True in prod
+    cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+
+    # CSRF header name expected on state-changing requests
+    csrf_header_name: str = "X-CSRF-Token"
 
     model_config = SettingsConfigDict(
         env_file=".env",

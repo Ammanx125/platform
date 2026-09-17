@@ -1,3 +1,4 @@
+# 0001_enable_pgvector.py
 """enable pgvector extension
 
 Revision ID: 0001_enable_pgvector
