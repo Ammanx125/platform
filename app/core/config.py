@@ -42,5 +42,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Storage
+    upload_dir: str = "./data/uploads"
+    max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
+    allowed_upload_extensions: list[str] = [".csv", ".xlsx", ".xls"]
+
+    # Ingestion worker
+    ingestion_worker_poll_seconds: float = 2.0
+    ingestion_worker_batch_size: int = 1
+
 
 settings = Settings()

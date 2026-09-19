@@ -1,0 +1,128 @@
+# app/services/ingestion/service.py
+from __future__ import annotations
+
+import hashlib
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.dataset import (
+    DataSource,
+    IngestionJob,
+    IngestionLineage,
+    StagedRow,
+)
+from app.services.ingestion.base import IngestionError
+from app.services.ingestion.registry import get_connector
+
+
+def _extension(filename: str) -> str:
+    if "." not in filename:
+        return ""
+    return "." + filename.rsplit(".", 1)[-1].lower()
+
+
+def extension_to_source_type(extension: str) -> str:
+    mapping = {".csv": "csv", ".xlsx": "excel", ".xls": "excel"}
+    try:
+        return mapping[extension.lower()]
+    except KeyError as exc:
+        raise IngestionError(f"unsupported extension: {extension}") from exc
+
+
+def build_storage_key(*, tenant_id: uuid.UUID, source_id: uuid.UUID, extension: str) -> str:
+    return f"{tenant_id}/{source_id}/{uuid.uuid4()}{extension}"
+
+
+def hash_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+async def enqueue_job(
+    db: AsyncSession, *, tenant_id: uuid.UUID, source_id: uuid.UUID
+) -> IngestionJob:
+    job = IngestionJob(tenant_id=tenant_id, source_id=source_id, status="pending")
+    db.add(job)
+    await db.flush()
+    return job
+
+
+async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
+    """
+    Executes one ingestion job to completion. Called by the worker.
+    Marks status accordingly and never raises to the caller — errors are
+    persisted on the job row.
+    """
+    job = (
+        await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
+    ).scalar_one_or_none()
+    if job is None:
+        return
+    if job.status not in ("pending",):
+        return
+
+    source = (
+        await db.execute(select(DataSource).where(DataSource.id == job.source_id))
+    ).scalar_one_or_none()
+    if source is None:
+        job.status = "failed"
+        job.error_message = "source not found"
+        job.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+        return
+
+    job.status = "running"
+    job.started_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    try:
+        lineage_row = (
+            await db.execute(
+                select(IngestionLineage).where(IngestionLineage.job_id == job.id)
+            )
+        ).scalar_one_or_none()
+        if lineage_row is None:
+            lineage_row = IngestionLineage(tenant_id=job.tenant_id, job_id=job.id)
+            db.add(lineage_row)
+            await db.flush()
+
+        storage_key = source.config.get("storage_key")
+        if not storage_key:
+            raise IngestionError("source has no storage_key in config")
+
+        connector = get_connector(source.source_type)
+        result = await connector.ingest(path=storage_key)
+
+        # Stage rows
+        for parsed in result.rows:
+            db.add(StagedRow(
+                tenant_id=job.tenant_id,
+                job_id=job.id,
+                source_id=source.id,
+                row_number=parsed.row_number,
+                raw_data=parsed.data,
+            ))
+
+        job.rows_read = len(result.rows) + len(result.errors)
+        job.rows_staged = len(result.rows)
+        lineage_row.errors = result.errors
+        lineage_row.encoding = result.metadata.encoding
+        lineage_row.delimiter = result.metadata.delimiter
+
+        job.status = "succeeded"
+        job.finished_at = datetime.now(timezone.utc)
+        await db.commit()
+
+    except Exception as exc:
+        await db.rollback()
+        # Re-fetch job to mark failure (rollback discarded the running state)
+        job = (
+            await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
+        ).scalar_one_or_none()
+        if job is not None:
+            job.status = "failed"
+            job.error_message = str(exc)[:2000]
+            job.finished_at = datetime.now(timezone.utc)
+            await db.commit()

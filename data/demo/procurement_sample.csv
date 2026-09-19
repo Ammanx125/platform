@@ -1,0 +1,9 @@
+supplier,product,quantity,unit_price,order_date
+Acme Supplies,Steel Bolt M8,1000,0.42,2026-01-15
+Acme Supplies,Steel Nut M8,2000,0.18,2026-01-15
+Beacon Metals,Aluminium Sheet 2mm,50,18.75,2026-01-20
+Beacon Metals,Aluminium Sheet 3mm,30,26.40,2026-01-20
+Cobalt Parts,Copper Wire 1.5mm,500,1.10,2026-02-01
+Cobalt Parts,Copper Wire 2.5mm,300,1.85,2026-02-01
+Delta Industrial,Steel Bolt M10,800,0.55,2026-02-05
+Delta Industrial,Steel Nut M10,1500,0.22,2026-02-05

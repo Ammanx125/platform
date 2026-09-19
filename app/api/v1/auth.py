@@ -1,6 +1,8 @@
 # app/api/v1/auth.py
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,9 +13,6 @@ from app.core.security import generate_csrf_token
 from app.db.session import get_db
 from app.schemas.auth import LoginRequest, MeResponse
 from app.services.auth import service as auth_service
-
-from typing import Annotated
-from fastapi import Cookie
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -77,7 +76,10 @@ async def login(
             db, email=body.email, password=body.password
         )
     except AuthError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
 
     _set_auth_cookies(response, access=access, refresh=refresh)
     return {"status": "ok"}
@@ -89,7 +91,26 @@ async def refresh_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     refresh_cookie: Annotated[str | None, Cookie(alias=settings.refresh_cookie_name)] = None,
 ) -> dict[str, str]:
-    ...
+    if not refresh_cookie:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="no refresh token",
+        )
+
+    try:
+        _user, access, new_refresh = await auth_service.refresh(
+            db, raw_refresh_token=refresh_cookie
+        )
+    except AuthError as exc:
+        _clear_auth_cookies(response)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+    _set_auth_cookies(response, access=access, refresh=new_refresh)
+    return {"status": "ok"}
+
 
 @router.post("/logout", dependencies=[Depends(require_csrf)])
 async def logout(
@@ -97,7 +118,10 @@ async def logout(
     db: Annotated[AsyncSession, Depends(get_db)],
     refresh_cookie: Annotated[str | None, Cookie(alias=settings.refresh_cookie_name)] = None,
 ) -> dict[str, str]:
-    ...
+    if refresh_cookie:
+        await auth_service.logout(db, raw_refresh_token=refresh_cookie)
+    _clear_auth_cookies(response)
+    return {"status": "ok"}
 
 
 @router.get("/me", response_model=MeResponse)
