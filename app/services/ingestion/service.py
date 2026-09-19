@@ -18,7 +18,7 @@ from app.services.ingestion.base import IngestionError
 from app.services.ingestion.registry import get_connector
 
 
-def _extension(filename: str) -> str:
+def extension_of(filename: str) -> str:
     if "." not in filename:
         return ""
     return "." + filename.rsplit(".", 1)[-1].lower()
@@ -110,6 +110,12 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         lineage_row.errors = result.errors
         lineage_row.encoding = result.metadata.encoding
         lineage_row.delimiter = result.metadata.delimiter
+
+        # Flush staged rows so the profiler can see them, then compute the
+        # profile. Kept inside the try so a profiling failure fails the job.
+        await db.flush()
+        from app.services.understanding.service import compute_profile
+        await compute_profile(db, job_id=job.id)
 
         job.status = "succeeded"
         job.finished_at = datetime.now(timezone.utc)

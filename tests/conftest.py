@@ -1,20 +1,15 @@
-# tests/security/conftest.py
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncGenerator
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.role import Role
+from app.core.security import hash_password
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.seed import ensure_permission_catalog, seed_tenant_roles
 from app.db.session import SessionLocal, engine
-from app.core.security import hash_password
 from app.main import app
 
 
@@ -33,10 +28,7 @@ async def dispose_db_engine() -> AsyncGenerator[None, None]:
 
 @pytest_asyncio.fixture
 async def two_tenants() -> AsyncGenerator[dict, None]:
-    """
-    Creates Tenant A with admin_a and Tenant B with admin_b.
-    Cleans up after the test.
-    """
+    """Create two tenants with admin users and clean them up after the test."""
     async with SessionLocal() as db:
         await ensure_permission_catalog(db)
 
@@ -67,13 +59,15 @@ async def two_tenants() -> AsyncGenerator[dict, None]:
         await db.commit()
 
         yield {
-            "tenant_a": ta.id, "tenant_b": tb.id,
-            "user_a": ua.id, "user_b": ub.id,
-            "email_a": ua.email, "email_b": ub.email,
+            "tenant_a": ta.id,
+            "tenant_b": tb.id,
+            "user_a": ua.id,
+            "user_b": ub.id,
+            "email_a": ua.email,
+            "email_b": ub.email,
             "password": "Passw0rd",
         }
 
-        # Cleanup
         await db.delete(ua)
         await db.delete(ub)
         await db.commit()

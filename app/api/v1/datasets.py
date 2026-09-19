@@ -1,6 +1,10 @@
 # app/api/v1/datasets.py
 from __future__ import annotations
 
+from app.db.models.understanding import DataProfile
+from app.schemas.understanding import DataProfileRead
+from app.services.understanding import service as understanding_service
+
 import uuid
 from typing import Annotated
 
@@ -111,7 +115,7 @@ async def upload_dataset(
     if not file.filename:
         raise HTTPException(status_code=400, detail="no filename")
 
-    ext = ingestion_service._extension(file.filename)
+    ext = ingestion_service.extension_of(file.filename)
     if ext not in settings.allowed_upload_extensions:
         raise HTTPException(
             status_code=400,
@@ -200,3 +204,68 @@ async def get_job(
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+@router.get(
+    "/{dataset_id}/jobs/{job_id}/profile",
+    response_model=DataProfileRead,
+)
+async def get_job_profile(
+    dataset_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[object, Depends(require_permission("dataset:read"))],
+) -> DataProfile:
+    # Confirm job belongs to this tenant AND this dataset.
+    job = (
+        await db.execute(
+            select(IngestionJob).where(
+                IngestionJob.id == job_id,
+                IngestionJob.source_id == dataset_id,
+                IngestionJob.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    profile = (
+        await db.execute(
+            select(DataProfile).where(
+                DataProfile.job_id == job_id,
+                DataProfile.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="profile not yet computed")
+    return profile
+
+
+@router.post(
+    "/{dataset_id}/jobs/{job_id}/profile",
+    response_model=DataProfileRead,
+)
+async def recompute_job_profile(
+    dataset_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+) -> DataProfile:
+    job = (
+        await db.execute(
+            select(IngestionJob).where(
+                IngestionJob.id == job_id,
+                IngestionJob.source_id == dataset_id,
+                IngestionJob.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    profile = await understanding_service.compute_profile(db, job_id=job_id)
+    await db.commit()
+    await db.refresh(profile)
+    return profile

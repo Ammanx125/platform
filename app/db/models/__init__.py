@@ -8,6 +8,7 @@ from app.db.models.dataset import (
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.role import Permission, Role, role_permissions, user_roles
 from app.db.models.tenant import Tenant
+from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "IngestionJob",
     "IngestionLineage",
     "StagedRow",
+    "DataProfile",
 ]
