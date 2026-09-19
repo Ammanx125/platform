@@ -6,7 +6,7 @@ assess quality, persist.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,11 +56,11 @@ async def compute_profile(
             tenant_id=job.tenant_id,
             job_id=job.id,
             source_id=job.source_id,
-            profiled_at=datetime.now(timezone.utc),
+            profiled_at=datetime.now(UTC),
         )
         db.add(existing)
 
-    existing.profiled_at = datetime.now(timezone.utc)
+    existing.profiled_at = datetime.now(UTC)
     existing.row_count = result.row_count
     existing.column_count = result.column_count
     existing.profile = result.to_dict()

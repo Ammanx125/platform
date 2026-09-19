@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -33,7 +33,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ---------- access tokens (JWT) ----------
 
 def create_access_token(*, user_id: uuid.UUID, tenant_id: uuid.UUID) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": str(user_id),
         "tid": str(tenant_id),

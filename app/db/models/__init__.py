@@ -7,21 +7,24 @@ from app.db.models.dataset import (
 )
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.role import Permission, Role, role_permissions, user_roles
+from app.db.models.semantic import CanonicalConcept, SemanticMapping
 from app.db.models.tenant import Tenant
 from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 
 __all__ = [
-    "DataProfile",
+    "Tenant",
+    "User",
+    "Role",
+    "Permission",
+    "RefreshToken",
+    "role_permissions",
+    "user_roles",
     "DataSource",
     "IngestionJob",
     "IngestionLineage",
-    "Permission",
-    "RefreshToken",
-    "Role",
     "StagedRow",
-    "Tenant",
-    "User",
-    "role_permissions",
-    "user_roles",
+    "DataProfile",
+    "CanonicalConcept",
+    "SemanticMapping",
 ]

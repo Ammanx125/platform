@@ -69,7 +69,7 @@ class CSVConnector:
                     "got": len(row),
                 })
                 continue
-            rows.append(ParsedRow(row_number=idx, data=dict(zip(header, row))))
+            rows.append(ParsedRow(row_number=idx, data=dict(zip(header, row, strict=True))))
 
         return IngestionResult(
             rows=rows,

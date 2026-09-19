@@ -1,0 +1,53 @@
+# app/schemas/semantic.py
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
+
+
+class CanonicalConceptRead(BaseModel):
+    key: str
+    display_name: str
+    description: str | None
+    domain: str
+    kind: str
+    value_type: str
+    synonyms: list[str]
+
+    model_config = {"from_attributes": True}
+
+
+class SemanticMappingRead(BaseModel):
+    id: uuid.UUID
+    source_id: uuid.UUID
+    source_column: str
+    canonical_concept_key: str
+    status: str
+    confidence: float | None
+    rationale: dict[str, Any]
+    confirmed_by_user_id: uuid.UUID | None
+    confirmed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SemanticMappingCreate(BaseModel):
+    """Manually create a mapping (human-authored, no matcher involved)."""
+    source_column: str = Field(min_length=1, max_length=200)
+    canonical_concept_key: str = Field(min_length=1, max_length=120)
+
+
+class SemanticMappingPatch(BaseModel):
+    """Confirm, reject, or reassign a mapping."""
+    status: Literal["proposed", "confirmed", "rejected"] | None = None
+    canonical_concept_key: str | None = Field(default=None, max_length=120)
+
+
+class ProposeMappingsResponse(BaseModel):
+    created: int
+    mappings: list[SemanticMappingRead]

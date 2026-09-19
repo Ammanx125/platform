@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,7 @@ async def _issue_refresh_token(
     family_id: uuid.UUID,
 ) -> tuple[str, RefreshToken]:
     raw = generate_refresh_token()
-    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_days)
+    expires_at = datetime.now(UTC) + timedelta(days=settings.refresh_token_days)
     row = RefreshToken(
         tenant_id=user.tenant_id,
         user_id=user.id,
@@ -82,7 +82,7 @@ async def refresh(db: AsyncSession, *, raw_refresh_token: str) -> tuple[User, st
     if row is None:
         raise AuthError("invalid refresh token")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if row.revoked_at is not None:
         # Reuse of a revoked token: revoke the entire family, refuse.
@@ -127,5 +127,5 @@ async def logout(db: AsyncSession, *, raw_refresh_token: str) -> None:
     ).scalar_one_or_none()
     if row is None or row.revoked_at is not None:
         return
-    row.revoked_at = datetime.now(timezone.utc)
+    row.revoked_at = datetime.now(UTC)
     await db.commit()

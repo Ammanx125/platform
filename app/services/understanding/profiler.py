@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.services.understanding.types import (
@@ -75,7 +75,7 @@ def _try_date(v: Any) -> bool:
         return False
     for fmt in _DATE_FORMATS:
         try:
-            datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            datetime.strptime(s, fmt).replace(tzinfo=UTC)
             return True
         except ValueError:
             continue

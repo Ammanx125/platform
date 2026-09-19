@@ -8,6 +8,7 @@ plus (optionally) the raw rows and returns zero or more QualityIssue items.
 from __future__ import annotations
 
 import re
+from datetime import UTC
 from typing import Any
 
 from app.services.understanding.types import (
@@ -108,7 +109,7 @@ def _check_invalid_dates(
     accept the 95% inference threshold; this rule surfaces the remaining 5%.
     Uses the same parse logic as the profiler (kept simple, no imports).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     formats = (
         "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
@@ -125,7 +126,7 @@ def _check_invalid_dates(
             return False
         for fmt in formats:
             try:
-                datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+                datetime.strptime(s, fmt).replace(tzinfo=UTC)
                 return True
             except ValueError:
                 continue

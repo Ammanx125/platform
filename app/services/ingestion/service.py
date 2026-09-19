@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,12 +69,12 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
     if source is None:
         job.status = "failed"
         job.error_message = "source not found"
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
         await db.commit()
         return
 
     job.status = "running"
-    job.started_at = datetime.now(timezone.utc)
+    job.started_at = datetime.now(UTC)
     await db.commit()
 
     try:
@@ -118,7 +118,7 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         await compute_profile(db, job_id=job.id)
 
         job.status = "succeeded"
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
         await db.commit()
 
     except Exception as exc:  # noqa: BLE001
@@ -130,5 +130,5 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         if job is not None:
             job.status = "failed"
             job.error_message = str(exc)[:2000]
-            job.finished_at = datetime.now(timezone.utc)
+            job.finished_at = datetime.now(UTC)
             await db.commit()
