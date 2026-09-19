@@ -12,16 +12,16 @@ from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 
 __all__ = [
-    "Tenant",
-    "User",
-    "Role",
-    "Permission",
-    "RefreshToken",
-    "role_permissions",
-    "user_roles",
+    "DataProfile",
     "DataSource",
     "IngestionJob",
     "IngestionLineage",
+    "Permission",
+    "RefreshToken",
+    "Role",
     "StagedRow",
-    "DataProfile",
+    "Tenant",
+    "User",
+    "role_permissions",
+    "user_roles",
 ]

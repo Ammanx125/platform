@@ -15,7 +15,7 @@ import asyncio
 import logging
 import signal
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.models.dataset import IngestionJob

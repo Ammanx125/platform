@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from app.services.understanding.types import (
@@ -52,9 +52,7 @@ def _try_int(v: Any) -> bool:
         return False
     if isinstance(v, int):
         return True
-    if isinstance(v, str) and _INT_RE.match(v.strip()):
-        return True
-    return False
+    return isinstance(v, str) and _INT_RE.match(v.strip()) is not None
 
 
 def _try_float(v: Any) -> bool:
@@ -62,9 +60,9 @@ def _try_float(v: Any) -> bool:
         return False
     if isinstance(v, (int, float)):
         return True
-    if isinstance(v, str) and (_INT_RE.match(v.strip()) or _FLOAT_RE.match(v.strip())):
-        return True
-    return False
+    return isinstance(v, str) and (
+        _INT_RE.match(v.strip()) is not None or _FLOAT_RE.match(v.strip()) is not None
+    )
 
 
 def _try_date(v: Any) -> bool:
@@ -77,7 +75,7 @@ def _try_date(v: Any) -> bool:
         return False
     for fmt in _DATE_FORMATS:
         try:
-            datetime.strptime(s, fmt)
+            datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
             return True
         except ValueError:
             continue
@@ -87,9 +85,7 @@ def _try_date(v: Any) -> bool:
 def _try_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return True
-    if isinstance(v, str) and v.strip().lower() in ("true", "false", "yes", "no"):
-        return True
-    return False
+    return isinstance(v, str) and v.strip().lower() in ("true", "false", "yes", "no")
 
 
 def _is_null(v: Any) -> bool:
@@ -116,9 +112,10 @@ def _infer_column_type(values: list[Any]) -> str:
         if passing / total >= 0.95:
             return type_name
 
-    if all(isinstance(v, str) for v in non_null):
-        if not any(fn(v) for _, fn in checks for v in non_null):
-            return "string"
+    if all(isinstance(v, str) for v in non_null) and not any(
+        fn(v) for _, fn in checks for v in non_null
+    ):
+        return "string"
 
     return "mixed"
 
@@ -256,7 +253,7 @@ def profile_rows(rows: list[dict[str, Any]]) -> DataProfileResult:
     columns: list[str] = []
     seen: set[str] = set()
     for r in rows:
-        for k in r.keys():
+        for k in r:
             if k not in seen:
                 seen.add(k)
                 columns.append(k)

@@ -1,10 +1,6 @@
 # app/api/v1/datasets.py
 from __future__ import annotations
 
-from app.db.models.understanding import DataProfile
-from app.schemas.understanding import DataProfileRead
-from app.services.understanding import service as understanding_service
-
 import uuid
 from typing import Annotated
 
@@ -19,15 +15,17 @@ from fastapi import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentTenantId, CurrentUser, require_permission
+from app.api.deps import CurrentTenantId, require_permission
 from app.core.config import settings
 from app.db.models.dataset import DataSource, IngestionJob
+from app.db.models.understanding import DataProfile
 from app.db.session import get_db
 from app.schemas.dataset import DataSourceCreate, DataSourceRead, IngestionJobRead
+from app.schemas.understanding import DataProfileRead
 from app.services.ingestion import service as ingestion_service
 from app.services.ingestion.base import IngestionError
 from app.services.storage.local import storage
-
+from app.services.understanding import service as understanding_service
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -99,7 +97,7 @@ async def upload_dataset(
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     _user: Annotated[object, Depends(require_permission("dataset:write"))],
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
 ) -> IngestionJob:
     source = (
         await db.execute(

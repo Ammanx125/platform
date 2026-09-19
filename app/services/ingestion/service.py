@@ -121,7 +121,7 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         job.finished_at = datetime.now(timezone.utc)
         await db.commit()
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         await db.rollback()
         # Re-fetch job to mark failure (rollback discarded the running state)
         job = (

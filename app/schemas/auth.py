@@ -6,9 +6,6 @@ import uuid
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from app.core.exceptions import AuthError
-
-
 _PASSWORD_RE = re.compile(r"^(?=.*[A-Za-z])(?=.*\d).+$")
 
 

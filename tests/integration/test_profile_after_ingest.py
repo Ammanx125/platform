@@ -10,7 +10,6 @@ from app.db.models.understanding import DataProfile
 from app.db.session import SessionLocal
 from app.services.ingestion.service import run_job
 
-
 CSV = (
     b"supplier,supplier_id,quantity,price,order_date\n"
     b"ACME,1,100,0.42,2026-01-15\n"

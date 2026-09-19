@@ -9,7 +9,6 @@ from app.db.models.dataset import IngestionJob, StagedRow
 from app.db.session import SessionLocal
 from app.services.ingestion.service import run_job
 
-
 CSV = b"supplier,product,qty,price\nAcme,Bolt,100,0.42\nBeacon,Nut,200,0.18\n"
 
 

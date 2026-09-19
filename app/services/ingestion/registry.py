@@ -5,7 +5,6 @@ from app.services.ingestion.base import Connector
 from app.services.ingestion.csv import CSVConnector
 from app.services.ingestion.excel import ExcelConnector
 
-
 _CONNECTORS: dict[str, Connector] = {
     "csv": CSVConnector(),
     "excel": ExcelConnector(),

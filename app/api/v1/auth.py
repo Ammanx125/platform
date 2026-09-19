@@ -14,7 +14,6 @@ from app.db.session import get_db
 from app.schemas.auth import LoginRequest, MeResponse
 from app.services.auth import service as auth_service
 
-
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -69,7 +68,7 @@ def _clear_auth_cookies(response: Response) -> None:
 async def login(
     body: LoginRequest,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> dict[str, str]:
     try:
         _user, access, refresh = await auth_service.login(

@@ -108,7 +108,7 @@ def _check_invalid_dates(
     accept the 95% inference threshold; this rule surfaces the remaining 5%.
     Uses the same parse logic as the profiler (kept simple, no imports).
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     formats = (
         "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y",
@@ -125,7 +125,7 @@ def _check_invalid_dates(
             return False
         for fmt in formats:
             try:
-                datetime.strptime(s, fmt)
+                datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
                 return True
             except ValueError:
                 continue

@@ -18,7 +18,6 @@ import sys
 from sqlalchemy import select
 
 from app.core.security import hash_password
-from app.db.models.role import Role
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.seed import ensure_permission_catalog, seed_tenant_roles

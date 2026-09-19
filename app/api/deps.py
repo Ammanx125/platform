@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Callable
+from collections.abc import Callable
+from typing import Annotated
 
 from fastapi import Cookie, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import AuthError, PermissionDenied
+from app.core.exceptions import AuthError
 from app.core.security import decode_access_token
 from app.db.models.user import User
 from app.db.session import get_db

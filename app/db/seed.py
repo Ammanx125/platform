@@ -6,8 +6,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.role import Permission, Role, role_permissions
-
+from app.db.models.role import Permission, Role
 
 CANONICAL_PERMISSIONS: dict[str, str] = {
     "user:manage":      "Invite, deactivate, and manage users in the tenant",

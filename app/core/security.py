@@ -9,6 +9,7 @@ from typing import Any
 
 import jwt
 from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
 
 from app.core.config import settings
 from app.core.exceptions import AuthError
@@ -25,7 +26,7 @@ def hash_password(plain: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     try:
         return password_hash.verify(plain, hashed)
-    except Exception:
+    except (TypeError, ValueError, UnknownHashError):
         return False
 
 
