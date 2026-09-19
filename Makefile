@@ -20,3 +20,20 @@ downgrade:
 	alembic downgrade -1
 dev:
 	uvicorn app.main:app --reload
+install:
+	pip install -e .
+
+install-dev:
+	pip install -e ".[dev]"
+
+lint:
+	ruff check .
+
+format:
+	ruff format .
+
+typecheck:
+	mypy app
+
+test:
+	pytest -q
