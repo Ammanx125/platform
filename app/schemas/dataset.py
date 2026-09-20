@@ -13,6 +13,18 @@ class DataSourceCreate(BaseModel):
     config: dict = Field(default_factory=dict)
 
 
+class WebhookSourceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class WebhookSourceCreated(BaseModel):
+    id: uuid.UUID
+    name: str
+    source_type: str
+    token: str
+    secret: str
+
+
 class DataSourceRead(BaseModel):
     id: uuid.UUID
     name: str
@@ -49,3 +61,4 @@ class StagedRowRead(BaseModel):
     raw_data: dict
 
     model_config = {"from_attributes": True}
+

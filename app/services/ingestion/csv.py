@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.services.ingestion.base import (
     IngestionError,
@@ -13,13 +13,18 @@ from app.services.ingestion.base import (
 )
 from app.services.storage.local import storage
 
+if TYPE_CHECKING:
+    from app.db.models.dataset import DataSource
+
 
 class CSVConnector:
     source_type = "csv"
 
-    async def _read_text(self, *, path: str) -> str:
-        raw = await storage.get(key=path)
-        # Try utf-8-sig first (handles BOM from Excel), fall back to latin-1.
+    async def _read_text(self, *, source: DataSource) -> str:
+        storage_key = source.config.get("storage_key")
+        if not storage_key:
+            raise IngestionError("source has no storage_key in config")
+        raw = await storage.get(key=storage_key)
         for encoding in ("utf-8-sig", "utf-8", "latin-1"):
             try:
                 return raw.decode(encoding)
@@ -27,8 +32,8 @@ class CSVConnector:
                 continue
         raise IngestionError("could not decode CSV file with supported encodings")
 
-    async def inspect(self, *, path: str) -> SourceMetadata:
-        text = await self._read_text(path=path)
+    async def inspect(self, *, source: DataSource) -> SourceMetadata:
+        text = await self._read_text(source=source)
         reader = csv.reader(io.StringIO(text))
         try:
             header = next(reader)
@@ -49,8 +54,8 @@ class CSVConnector:
             encoding="utf-8-sig",
         )
 
-    async def ingest(self, *, path: str) -> IngestionResult:
-        text = await self._read_text(path=path)
+    async def ingest(self, *, source: DataSource) -> IngestionResult:
+        text = await self._read_text(source=source)
         reader = csv.reader(io.StringIO(text))
         try:
             header = next(reader)

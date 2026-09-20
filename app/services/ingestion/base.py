@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    # Imported only for typing; avoids circular imports at runtime.
+    from app.db.models.dataset import DataSource
 
 
 class IngestionError(Exception):
@@ -42,8 +46,19 @@ class IngestionResult:
     errors: list[dict[str, Any]] = field(default_factory=list)
 
 
-class Connector(Protocol):
+class PullConnector(Protocol):
+    """
+    A connector that pulls data from a source on demand.
+
+    Implementations:
+      - CSVConnector, ExcelConnector   (read from storage)
+      - SQLConnector                   (read from a customer database)
+      - HTTPConnector                  (read from an HTTP endpoint)
+
+    Webhooks do NOT implement this. They are push-based and handled by
+    app/services/ingestion/webhook.py plus the webhook receiver router.
+    """
     source_type: str
 
-    async def inspect(self, *, path: str) -> SourceMetadata: ...
-    async def ingest(self, *, path: str) -> IngestionResult: ...
+    async def inspect(self, *, source: DataSource) -> SourceMetadata: ...
+    async def ingest(self, *, source: DataSource) -> IngestionResult: ...

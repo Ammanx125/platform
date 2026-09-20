@@ -11,6 +11,7 @@ from app.db.models.semantic import CanonicalConcept, SemanticMapping
 from app.db.models.tenant import Tenant
 from app.db.models.understanding import DataProfile
 from app.db.models.user import User
+from app.db.models.webhook import WebhookDelivery
 
 __all__ = [
     "Tenant",
@@ -27,4 +28,5 @@ __all__ = [
     "DataProfile",
     "CanonicalConcept",
     "SemanticMapping",
+    "WebhookDelivery",
 ]

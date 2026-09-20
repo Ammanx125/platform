@@ -55,3 +55,9 @@ The propose endpoint is POST /datasets/{id}/mappings/propose?job_id=... — the 
 create_mapping sets status="confirmed" directly. A human who types a mapping by hand is confirming it. This is different from matcher proposals, which start as proposed.
 
 The unique constraint (source_id, source_column) means create_mapping returns 409 if the column already has a mapping. The right move is PATCH. This is a bit strict — some teams prefer upsert. Tell me if you want upsert semantics instead.
+
+Fernet is authenticated encryption (AES-128-CBC + HMAC-SHA256). Tampering is detected and rejected. This is the right primitive for secrets.
+
+Dev fallback derives from JWT_SECRET. Two consequences: (1) you don't need a new env var for local dev, (2) if you rotate JWT_SECRET, previously-encrypted webhook secrets become undecryptable — which is fine in dev, and would be a big deal in prod, which is why prod refuses the fallback.
+
+DecryptionError is its own type so callers can distinguish "encrypted but bad key" from "not encrypted at all."

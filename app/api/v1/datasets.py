@@ -20,9 +20,16 @@ from app.core.config import settings
 from app.db.models.dataset import DataSource, IngestionJob
 from app.db.models.understanding import DataProfile
 from app.db.session import get_db
-from app.schemas.dataset import DataSourceCreate, DataSourceRead, IngestionJobRead
+from app.schemas.dataset import (
+    DataSourceCreate,
+    DataSourceRead,
+    IngestionJobRead,
+    WebhookSourceCreate,
+    WebhookSourceCreated,
+)
 from app.schemas.understanding import DataProfileRead
 from app.services.ingestion import service as ingestion_service
+from app.services.ingestion import webhook as webhook_service
 from app.services.ingestion.base import IngestionError
 from app.services.storage.local import storage
 from app.services.understanding import service as understanding_service
@@ -239,6 +246,38 @@ async def get_job_profile(
         raise HTTPException(status_code=404, detail="profile not yet computed")
     return profile
 
+@router.post(
+    "/webhook",
+    response_model=WebhookSourceCreated,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_webhook_source(
+    body: WebhookSourceCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+) -> WebhookSourceCreated:
+    """
+    Create a webhook data source.
+
+    Returns the token and signing secret ONCE. Neither is retrievable later
+    in plaintext. The customer configures their sender with:
+
+      URL:    {base_url}/api/v1/webhooks/{token}
+      Header: X-Sansa-Signature: hex(HMAC-SHA256(secret, raw_body))
+    """
+    source, token, secret = await webhook_service.create_webhook_source(
+        db, tenant_id=tenant_id, name=body.name
+    )
+    await db.commit()
+    await db.refresh(source)
+    return WebhookSourceCreated(
+        id=source.id,
+        name=source.name,
+        source_type=source.source_type,
+        token=token,
+        secret=secret,
+    )
 
 @router.post(
     "/{dataset_id}/jobs/{job_id}/profile",
@@ -267,3 +306,4 @@ async def recompute_job_profile(
     await db.commit()
     await db.refresh(profile)
     return profile
+

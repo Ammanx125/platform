@@ -51,5 +51,16 @@ class Settings(BaseSettings):
     ingestion_worker_poll_seconds: float = 2.0
     ingestion_worker_batch_size: int = 1
 
+        # SQL connector
+    sql_row_limit: int = 10000
+    sql_timeout_seconds: int = 30
+
+    # HTTP connector
+    http_timeout_seconds: int = 30
+    http_max_response_bytes: int = 10 * 1024 * 1024  # 10 MB
+
+    # Webhook encryption (see crypto decision)
+    webhook_enc_key: str | None = None
+
 
 settings = Settings()

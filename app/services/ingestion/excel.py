@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import io
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openpyxl import load_workbook
 
@@ -14,37 +14,43 @@ from app.services.ingestion.base import (
 )
 from app.services.storage.local import storage
 
+if TYPE_CHECKING:
+    from app.db.models.dataset import DataSource
+
 
 def _coerce(value: Any) -> Any:
-    """Normalize Excel cell values to JSON-safe types."""
     if value is None:
         return None
     if isinstance(value, (str, int, float, bool)):
         return value
-    # dates, datetimes, Decimals, etc.
     return str(value)
 
 
 class ExcelConnector:
     source_type = "excel"
 
-    async def _load(self, *, path: str, sheet_name: str | None = None):
-        raw = await storage.get(key=path)
+    async def _load(self, *, source: DataSource, sheet_name: str | None = None):
+        storage_key = source.config.get("storage_key")
+        if not storage_key:
+            raise IngestionError("source has no storage_key in config")
+        raw = await storage.get(key=storage_key)
         try:
             wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
         except Exception as exc:
             raise IngestionError(f"could not open Excel file: {exc}") from exc
 
-        if sheet_name is None:
+        sheet = sheet_name or source.config.get("sheet_name")
+        if sheet is None:
             ws = wb[wb.sheetnames[0]]
         else:
-            if sheet_name not in wb.sheetnames:
-                raise IngestionError(f"sheet not found: {sheet_name}")
-            ws = wb[sheet_name]
+            if sheet not in wb.sheetnames:
+                wb.close()
+                raise IngestionError(f"sheet not found: {sheet}")
+            ws = wb[sheet]
         return wb, ws
 
-    async def inspect(self, *, path: str) -> SourceMetadata:
-        wb, ws = await self._load(path=path)
+    async def inspect(self, *, source: DataSource) -> SourceMetadata:
+        wb, ws = await self._load(source=source)
         try:
             it = ws.iter_rows(values_only=True)
             header_row = next(it, None)
@@ -68,8 +74,8 @@ class ExcelConnector:
         finally:
             wb.close()
 
-    async def ingest(self, *, path: str) -> IngestionResult:
-        wb, ws = await self._load(path=path)
+    async def ingest(self, *, source: DataSource) -> IngestionResult:
+        wb, ws = await self._load(source=source)
         try:
             it = ws.iter_rows(values_only=True)
             header_row = next(it, None)
@@ -84,7 +90,6 @@ class ExcelConnector:
                 if row is None:
                     continue
                 data = {h: _coerce(v) for h, v in zip(header, row, strict=False)}
-                # Skip fully-empty rows
                 if all(v is None or v == "" for v in data.values()):
                     continue
                 if len(row) != len(header):

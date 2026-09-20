@@ -5,3 +5,5 @@
   --admin-password "Sansa2026"
 
 
+from app.core.crypto import generate_key; print(generate_key())
+KDlg8feQ3YYVD_VqkWODytoIlFoWyv3CsI2XIMISw_Y=             # The result

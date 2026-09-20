@@ -37,6 +37,13 @@ class DataSource(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     source_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    # Webhook-only fields. Set when source_type='webhook'.
+    webhook_token_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
+    webhook_secret_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
     jobs = relationship(
         "IngestionJob",

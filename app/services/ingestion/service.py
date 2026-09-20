@@ -88,12 +88,14 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             db.add(lineage_row)
             await db.flush()
 
-        storage_key = source.config.get("storage_key")
-        if not storage_key:
-            raise IngestionError("source has no storage_key in config")
-
-        connector = get_connector(source.source_type)
-        result = await connector.ingest(path=storage_key)
+        if source.source_type == "webhook":
+            from app.services.ingestion import webhook as webhook_service
+            result = await webhook_service.process_pending_deliveries(
+                db, job=job
+            )
+        else:
+            connector = get_connector(source.source_type)
+            result = await connector.ingest(source=source)
 
         # Stage rows
         for parsed in result.rows:
@@ -132,3 +134,28 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             job.error_message = str(exc)[:2000]
             job.finished_at = datetime.now(UTC)
             await db.commit()
+
+
+async def ingest_once(
+    db: AsyncSession, *, tenant_id: uuid.UUID, source_id: uuid.UUID
+) -> IngestionJob:
+    """
+    Enqueue and *synchronously run* an ingestion for a pull source.
+
+    Used by POST /datasets/{id}/ingest for SQL and HTTP sources that don't
+    go through the upload flow. The upload flow (CSV/Excel) already creates
+    a job; this is the equivalent for pull connectors.
+
+    Runs synchronously for now because SQL/HTTP ingests are typically fast.
+    If a source is slow, the caller should still get a job_id back
+    immediately — in that case, switch this to enqueue-only and let the
+    worker pick it up.
+    """
+    job = await enqueue_job(db, tenant_id=tenant_id, source_id=source_id)
+    await db.commit()
+    await run_job(db, job_id=job.id)
+    # re-fetch to return fresh state
+    job = (
+        await db.execute(select(IngestionJob).where(IngestionJob.id == job.id))
+    ).scalar_one()
+    return job
