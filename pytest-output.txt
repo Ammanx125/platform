@@ -1,0 +1,486 @@
+............................FF....FFF..................                  [100%]
+================================== FAILURES ===================================
+___________________________ test_webhook_end_to_end ___________________________
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+>               return Fernet(key_str.encode("utf-8"))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\core\crypto.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cryptography.fernet.Fernet object at 0x000002513B3E5D30>
+key = b"\x84\\\x96\xc35\xfa\x11\x1c\xe0M\xd31u\\&\x11(G\x11\xb0\xe6\x10\xc7\xfe8T\xe7\xbe9\xc2J\xb4m\xd8\x1f\x7fZ\xda'\x9e\xf4\xff\x9f\x1b\xb6\xce\x92\xf0"
+backend = None
+
+    def __init__(
+        self,
+        key: bytes | str,
+        backend: typing.Any = None,
+    ) -> None:
+        try:
+            key = base64.urlsafe_b64decode(key)
+        except binascii.Error as exc:
+            raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            ) from exc
+        if len(key) != 32:
+>           raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            )
+E           ValueError: Fernet key must be 32 url-safe base64-encoded bytes.
+
+.venv\Lib\site-packages\cryptography\fernet.py:41: ValueError
+
+The above exception was the direct cause of the following exception:
+
+client = <httpx.AsyncClient object at 0x000002513C637D50>
+two_tenants = {'tenant_a': UUID('4d834f32-38b5-45d4-9565-54392450b7fe'), 'tenant_b': UUID('94ed8acd-7507-43b4-bae3-d33870a53af7'), 'user_a': UUID('ac3bc073-1970-47ad-99ab-81cce7f6be16'), 'user_b': UUID('9e6541d1-0c4a-4170-ad1f-af4c317ed0a3'), ...}
+
+    @pytest.mark.asyncio
+    async def test_webhook_end_to_end(client: AsyncClient, two_tenants: dict) -> None:
+        await _login(client, two_tenants["email_a"], two_tenants["password"])
+    
+        # create webhook source
+>       r = await client.post(
+            "/api/v1/datasets/webhook",
+            json={"name": "Test webhook"},
+            headers=_csrf(client),
+        )
+
+tests\unit\ingestion\test_webhook_ingest.py:29: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\httpx\_client.py:1859: in post
+    return await self.request(
+.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+.venv\Lib\site-packages\starlette\applications.py:96: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:670: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:2734: in app
+    await route.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1780: in handle
+    await self.original_router.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:2789: in handle
+    await included_router._handle_selected(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1791: in _handle_selected
+    await route.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1780: in handle
+    await self.original_router.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:2789: in handle
+    await included_router._handle_selected(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1800: in _handle_selected
+    await original_route.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1279: in handle
+    await app(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:158: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv\Lib\site-packages\fastapi\routing.py:144: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\fastapi\routing.py:706: in app
+    raw_response = await run_endpoint_function(
+.venv\Lib\site-packages\fastapi\routing.py:352: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\api\v1\datasets.py:269: in create_webhook_source
+    source, token, secret = await webhook_service.create_webhook_source(
+app\services\ingestion\webhook.py:99: in create_webhook_source
+    webhook_secret_encrypted=crypto.encrypt(secret),  # Fernet ciphertext
+                             ^^^^^^^^^^^^^^^^^^^^^^
+app\core\crypto.py:62: in encrypt
+    f = _get_fernet()
+        ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+                return Fernet(key_str.encode("utf-8"))
+            except Exception as exc:
+>               raise SansaError(f"invalid WEBHOOK_ENC_KEY: {exc}") from exc
+E               app.core.exceptions.SansaError: invalid WEBHOOK_ENC_KEY: Fernet key must be 32 url-safe base64-encoded bytes.
+
+app\core\crypto.py:44: SansaError
+_____________________ test_webhook_rejects_bad_signature ______________________
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+>               return Fernet(key_str.encode("utf-8"))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\core\crypto.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cryptography.fernet.Fernet object at 0x000002513C571450>
+key = b"\x84\\\x96\xc35\xfa\x11\x1c\xe0M\xd31u\\&\x11(G\x11\xb0\xe6\x10\xc7\xfe8T\xe7\xbe9\xc2J\xb4m\xd8\x1f\x7fZ\xda'\x9e\xf4\xff\x9f\x1b\xb6\xce\x92\xf0"
+backend = None
+
+    def __init__(
+        self,
+        key: bytes | str,
+        backend: typing.Any = None,
+    ) -> None:
+        try:
+            key = base64.urlsafe_b64decode(key)
+        except binascii.Error as exc:
+            raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            ) from exc
+        if len(key) != 32:
+>           raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            )
+E           ValueError: Fernet key must be 32 url-safe base64-encoded bytes.
+
+.venv\Lib\site-packages\cryptography\fernet.py:41: ValueError
+
+The above exception was the direct cause of the following exception:
+
+client = <httpx.AsyncClient object at 0x000002513C58A990>
+two_tenants = {'tenant_a': UUID('b319781f-1984-4945-a007-ed2bfddb5e3a'), 'tenant_b': UUID('7006a2b3-926a-4a08-b668-8f098e818fb8'), 'user_a': UUID('b939a129-8e86-4a7f-bcb9-15daf4012f72'), 'user_b': UUID('bd815b39-0dc5-4d32-92a4-9f97689331b6'), ...}
+
+    @pytest.mark.asyncio
+    async def test_webhook_rejects_bad_signature(client: AsyncClient, two_tenants: dict) -> None:
+        await _login(client, two_tenants["email_a"], two_tenants["password"])
+    
+>       r = await client.post(
+            "/api/v1/datasets/webhook",
+            json={"name": "Bad sig test"},
+            headers=_csrf(client),
+        )
+
+tests\unit\ingestion\test_webhook_ingest.py:82: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+.venv\Lib\site-packages\httpx\_client.py:1859: in post
+    return await self.request(
+.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+.venv\Lib\site-packages\starlette\applications.py:96: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+.venv\Lib\site-packages\starlette\routing.py:670: in __call__
+    await self.middleware_stack(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:2734: in app
+    await route.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1780: in handle
+    await self.original_router.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:2789: in handle
+    await included_router._handle_selected(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1791: in _handle_selected
+    await route.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1780: in handle
+    await self.original_router.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:2789: in handle
+    await included_router._handle_selected(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1800: in _handle_selected
+    await original_route.handle(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:1279: in handle
+    await app(scope, receive, send)
+.venv\Lib\site-packages\fastapi\routing.py:158: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+.venv\Lib\site-packages\fastapi\routing.py:144: in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+.venv\Lib\site-packages\fastapi\routing.py:706: in app
+    raw_response = await run_endpoint_function(
+.venv\Lib\site-packages\fastapi\routing.py:352: in run_endpoint_function
+    return await dependant.call(**values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+app\api\v1\datasets.py:269: in create_webhook_source
+    source, token, secret = await webhook_service.create_webhook_source(
+app\services\ingestion\webhook.py:99: in create_webhook_source
+    webhook_secret_encrypted=crypto.encrypt(secret),  # Fernet ciphertext
+                             ^^^^^^^^^^^^^^^^^^^^^^
+app\core\crypto.py:62: in encrypt
+    f = _get_fernet()
+        ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+                return Fernet(key_str.encode("utf-8"))
+            except Exception as exc:
+>               raise SansaError(f"invalid WEBHOOK_ENC_KEY: {exc}") from exc
+E               app.core.exceptions.SansaError: invalid WEBHOOK_ENC_KEY: Fernet key must be 32 url-safe base64-encoded bytes.
+
+app\core\crypto.py:44: SansaError
+_______________________ test_encrypt_decrypt_round_trip _______________________
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+>               return Fernet(key_str.encode("utf-8"))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\core\crypto.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cryptography.fernet.Fernet object at 0x000002513C667110>
+key = b"\x84\\\x96\xc35\xfa\x11\x1c\xe0M\xd31u\\&\x11(G\x11\xb0\xe6\x10\xc7\xfe8T\xe7\xbe9\xc2J\xb4m\xd8\x1f\x7fZ\xda'\x9e\xf4\xff\x9f\x1b\xb6\xce\x92\xf0"
+backend = None
+
+    def __init__(
+        self,
+        key: bytes | str,
+        backend: typing.Any = None,
+    ) -> None:
+        try:
+            key = base64.urlsafe_b64decode(key)
+        except binascii.Error as exc:
+            raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            ) from exc
+        if len(key) != 32:
+>           raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            )
+E           ValueError: Fernet key must be 32 url-safe base64-encoded bytes.
+
+.venv\Lib\site-packages\cryptography\fernet.py:41: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    def test_encrypt_decrypt_round_trip() -> None:
+        plaintext = "shhh-this-is-a-secret"
+>       ciphertext = crypto.encrypt(plaintext)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_crypto.py:9: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\core\crypto.py:62: in encrypt
+    f = _get_fernet()
+        ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+                return Fernet(key_str.encode("utf-8"))
+            except Exception as exc:
+>               raise SansaError(f"invalid WEBHOOK_ENC_KEY: {exc}") from exc
+E               app.core.exceptions.SansaError: invalid WEBHOOK_ENC_KEY: Fernet key must be 32 url-safe base64-encoded bytes.
+
+app\core\crypto.py:44: SansaError
+________________________ test_decrypt_rejects_tampered ________________________
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+>               return Fernet(key_str.encode("utf-8"))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\core\crypto.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cryptography.fernet.Fernet object at 0x000002513C56B230>
+key = b"\x84\\\x96\xc35\xfa\x11\x1c\xe0M\xd31u\\&\x11(G\x11\xb0\xe6\x10\xc7\xfe8T\xe7\xbe9\xc2J\xb4m\xd8\x1f\x7fZ\xda'\x9e\xf4\xff\x9f\x1b\xb6\xce\x92\xf0"
+backend = None
+
+    def __init__(
+        self,
+        key: bytes | str,
+        backend: typing.Any = None,
+    ) -> None:
+        try:
+            key = base64.urlsafe_b64decode(key)
+        except binascii.Error as exc:
+            raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            ) from exc
+        if len(key) != 32:
+>           raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            )
+E           ValueError: Fernet key must be 32 url-safe base64-encoded bytes.
+
+.venv\Lib\site-packages\cryptography\fernet.py:41: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    def test_decrypt_rejects_tampered() -> None:
+>       ciphertext = crypto.encrypt("original")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_crypto.py:15: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\core\crypto.py:62: in encrypt
+    f = _get_fernet()
+        ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+                return Fernet(key_str.encode("utf-8"))
+            except Exception as exc:
+>               raise SansaError(f"invalid WEBHOOK_ENC_KEY: {exc}") from exc
+E               app.core.exceptions.SansaError: invalid WEBHOOK_ENC_KEY: Fernet key must be 32 url-safe base64-encoded bytes.
+
+app\core\crypto.py:44: SansaError
+______________________ test_encrypt_is_nondeterministic _______________________
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+>               return Fernet(key_str.encode("utf-8"))
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+app\core\crypto.py:42: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <cryptography.fernet.Fernet object at 0x000002513C56BBB0>
+key = b"\x84\\\x96\xc35\xfa\x11\x1c\xe0M\xd31u\\&\x11(G\x11\xb0\xe6\x10\xc7\xfe8T\xe7\xbe9\xc2J\xb4m\xd8\x1f\x7fZ\xda'\x9e\xf4\xff\x9f\x1b\xb6\xce\x92\xf0"
+backend = None
+
+    def __init__(
+        self,
+        key: bytes | str,
+        backend: typing.Any = None,
+    ) -> None:
+        try:
+            key = base64.urlsafe_b64decode(key)
+        except binascii.Error as exc:
+            raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            ) from exc
+        if len(key) != 32:
+>           raise ValueError(
+                "Fernet key must be 32 url-safe base64-encoded bytes."
+            )
+E           ValueError: Fernet key must be 32 url-safe base64-encoded bytes.
+
+.venv\Lib\site-packages\cryptography\fernet.py:41: ValueError
+
+The above exception was the direct cause of the following exception:
+
+    def test_encrypt_is_nondeterministic() -> None:
+        # Same plaintext, two calls, different ciphertexts (Fernet includes a nonce)
+>       a = crypto.encrypt("same")
+            ^^^^^^^^^^^^^^^^^^^^^^
+
+tests\unit\test_crypto.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\core\crypto.py:62: in encrypt
+    f = _get_fernet()
+        ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+    def _get_fernet() -> Fernet:
+        key_str = settings.webhook_enc_key
+        if key_str:
+            try:
+                return Fernet(key_str.encode("utf-8"))
+            except Exception as exc:
+>               raise SansaError(f"invalid WEBHOOK_ENC_KEY: {exc}") from exc
+E               app.core.exceptions.SansaError: invalid WEBHOOK_ENC_KEY: Fernet key must be 32 url-safe base64-encoded bytes.
+
+app\core\crypto.py:44: SansaError
+============================== warnings summary ===============================
+tests/integration/test_csv_ingestion.py::test_csv_upload_and_run
+tests/integration/test_profile_after_ingest.py::test_profile_is_written_after_ingest
+tests/integration/test_profile_after_ingest.py::test_profile_endpoints
+tests/integration/test_semantic_mappings.py::test_propose_and_confirm_mappings
+tests/security/test_login_and_cookies.py::test_login_sets_cookies
+tests/security/test_login_and_cookies.py::test_me_returns_own_tenant
+tests/security/test_permissions.py::test_admin_has_user_manage
+tests/unit/ingestion/test_webhook_ingest.py::test_webhook_end_to_end
+tests/unit/ingestion/test_webhook_ingest.py::test_webhook_rejects_bad_signature
+  D:\COMPANY FILES\platform\.venv\Lib\site-packages\jwt\api_jwt.py:149: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    return self._jws.encode(
+
+tests/integration/test_csv_ingestion.py::test_csv_upload_and_run
+tests/integration/test_profile_after_ingest.py::test_profile_is_written_after_ingest
+tests/integration/test_profile_after_ingest.py::test_profile_endpoints
+tests/integration/test_semantic_mappings.py::test_propose_and_confirm_mappings
+tests/integration/test_semantic_mappings.py::test_propose_and_confirm_mappings
+tests/security/test_login_and_cookies.py::test_me_returns_own_tenant
+tests/security/test_permissions.py::test_admin_has_user_manage
+tests/unit/ingestion/test_webhook_ingest.py::test_webhook_end_to_end
+tests/unit/ingestion/test_webhook_ingest.py::test_webhook_rejects_bad_signature
+  D:\COMPANY FILES\platform\.venv\Lib\site-packages\jwt\api_jwt.py:370: InsecureKeyLengthWarning: The HMAC key is 23 bytes long, which is below the minimum recommended length of 32 bytes for SHA256. See RFC 7518 Section 3.2.
+    decoded = self.decode_complete(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/ingestion/test_webhook_ingest.py::test_webhook_end_to_end
+FAILED tests/unit/ingestion/test_webhook_ingest.py::test_webhook_rejects_bad_signature
+FAILED tests/unit/test_crypto.py::test_encrypt_decrypt_round_trip - app.core....
+FAILED tests/unit/test_crypto.py::test_decrypt_rejects_tampered - app.core.ex...
+FAILED tests/unit/test_crypto.py::test_encrypt_is_nondeterministic - app.core...
+5 failed, 50 passed, 18 warnings in 25.41s

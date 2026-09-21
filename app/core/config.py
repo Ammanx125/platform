@@ -2,6 +2,7 @@
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -41,6 +42,12 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _check_jwt_secret_length(self) -> "Settings":
+        if len(self.jwt_secret.encode("utf-8")) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 bytes")
+        return self
 
     # Storage
     upload_dir: str = "./data/uploads"

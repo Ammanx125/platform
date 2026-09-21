@@ -40,8 +40,12 @@ def _get_fernet() -> Fernet:
     if key_str:
         try:
             return Fernet(key_str.encode("utf-8"))
-        except Exception as exc:
-            raise SansaError(f"invalid WEBHOOK_ENC_KEY: {exc}") from exc
+        except Exception:
+            if settings.environment == "development":
+                return Fernet(_derive_key_from_jwt_secret())
+            raise SansaError(
+                f"invalid WEBHOOK_ENC_KEY: {key_str!r}"
+            )
 
     if settings.environment != "development":
         raise SansaError(

@@ -2,6 +2,16 @@
 import pytest
 
 from app.core import crypto
+from app.core.config import Settings
+
+
+def test_jwt_secret_must_be_at_least_32_bytes() -> None:
+    with pytest.raises(ValueError, match="JWT_SECRET must be at least 32 bytes"):
+        Settings(
+            environment="development",
+            database_url="postgresql+asyncpg://user:pass@localhost:5432/db",
+            jwt_secret="short-secret-too-short",
+        )
 
 
 def test_encrypt_decrypt_round_trip() -> None:
