@@ -187,7 +187,7 @@ def _column_profile(name: str, values: list[Any], row_count: int) -> ColumnProfi
 
     # Top values — bounded by Counter on a sample if distinct count is huge.
     if track_distinct:
-        counter = Counter()
+        counter: Counter[Any] = Counter()
         for v in non_null:
             try:
                 counter[v] += 1

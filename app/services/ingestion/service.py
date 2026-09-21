@@ -136,26 +136,28 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             await db.commit()
 
 
-async def ingest_once(
+async def enqueue_ingest(
     db: AsyncSession, *, tenant_id: uuid.UUID, source_id: uuid.UUID
 ) -> IngestionJob:
     """
-    Enqueue and *synchronously run* an ingestion for a pull source.
+    Enqueue an ingestion job for a pull source. Returns the pending job.
 
-    Used by POST /datasets/{id}/ingest for SQL and HTTP sources that don't
-    go through the upload flow. The upload flow (CSV/Excel) already creates
-    a job; this is the equivalent for pull connectors.
-
-    Runs synchronously for now because SQL/HTTP ingests are typically fast.
-    If a source is slow, the caller should still get a job_id back
-    immediately — in that case, switch this to enqueue-only and let the
-    worker pick it up.
+    Does NOT run the job. The worker picks it up. Callers poll
+    GET /datasets/{id}/jobs/{job_id} for status.
     """
+    source = (
+        await db.execute(
+            select(DataSource).where(
+                DataSource.id == source_id,
+                DataSource.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if source is None:
+        raise ValueError(f"source not found: {source_id}")
+    if not source.is_active:
+        raise ValueError("source is inactive")
+
     job = await enqueue_job(db, tenant_id=tenant_id, source_id=source_id)
-    await db.commit()
-    await run_job(db, job_id=job.id)
-    # re-fetch to return fresh state
-    job = (
-        await db.execute(select(IngestionJob).where(IngestionJob.id == job.id))
-    ).scalar_one()
+    await db.flush()
     return job

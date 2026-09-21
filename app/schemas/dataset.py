@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -62,3 +63,36 @@ class StagedRowRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class HTTPSourceConfig(BaseModel):
+    """
+    Config for a DataSource with source_type='http'.
+
+    All fields except `url` are optional. `auth_ref` refers to a value
+    resolved by app.core.secrets (env var SANSA_SECRET_<auth_ref>).
+    """
+    url: str
+    method: Literal["GET", "POST"] = "GET"
+    format: Literal["json", "csv"] = "json"
+    headers: dict[str, str] = Field(default_factory=dict)
+    json_path: str | None = None       # e.g. "$.data.items"
+    auth_ref: str | None = None
+    auth_header: str = "Authorization"
+    auth_scheme: str | None = None     # e.g. "Bearer"
+    timeout_seconds: int = 30
+    max_response_bytes: int = 10 * 1024 * 1024
+    allowed_hosts: list[str] = Field(default_factory=list)
+    body: dict | None = None           # for POST
+
+
+class SQLSourceConfig(BaseModel):
+    """
+    Config for a DataSource with source_type='sql'.
+
+    `credential_ref` refers to a value resolved by app.core.secrets
+    (env var SANSA_SECRET_<credential_ref>).
+    """
+    credential_ref: str
+    query: str
+    row_limit: int = 10000
+    timeout_seconds: int = 30
+    

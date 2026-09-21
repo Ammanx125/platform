@@ -3,12 +3,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, require_csrf
 from app.core.config import settings
 from app.core.exceptions import AuthError
+from app.core.rate_limit import limiter
 from app.core.security import generate_csrf_token
 from app.db.session import get_db
 from app.schemas.auth import LoginRequest, MeResponse
@@ -65,7 +66,9 @@ def _clear_auth_cookies(response: Response) -> None:
 
 
 @router.post("/login")
+@limiter.limit("10/minute")
 async def login(
+    request: Request,
     body: LoginRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),  # noqa: B008
@@ -85,7 +88,9 @@ async def login(
 
 
 @router.post("/refresh", dependencies=[Depends(require_csrf)])
+@limiter.limit("30/minute")
 async def refresh_session(
+    request: Request,
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     refresh_cookie: Annotated[str | None, Cookie(alias=settings.refresh_cookie_name)] = None,
@@ -112,7 +117,9 @@ async def refresh_session(
 
 
 @router.post("/logout", dependencies=[Depends(require_csrf)])
+@limiter.limit("30/minute")
 async def logout(
+    request: Request,
     response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     refresh_cookie: Annotated[str | None, Cookie(alias=settings.refresh_cookie_name)] = None,

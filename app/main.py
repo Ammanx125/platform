@@ -1,15 +1,32 @@
 # app/main.py
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Depends, FastAPI, HTTPException
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
+from starlette.responses import Response
 
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 
 app = FastAPI(title=settings.app_name)
+
+
+def _rate_limit_exception_handler(request: Request, exc: Exception) -> Response:
+    return _rate_limit_exceeded_handler(request, cast(RateLimitExceeded, exc))
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exception_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(api_router)
 

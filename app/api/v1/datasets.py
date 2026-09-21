@@ -307,3 +307,56 @@ async def recompute_job_profile(
     await db.refresh(profile)
     return profile
 
+@router.post(
+    "/{dataset_id}/ingest",
+    response_model=IngestionJobRead,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def trigger_ingest(
+    dataset_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+) -> IngestionJob:
+    """
+    Enqueue an ingestion for an existing pull source (sql, http).
+
+    Returns 202 with a pending job. The worker processes it; poll
+    GET /datasets/{dataset_id}/jobs/{job_id} for status.
+
+    Not valid for csv/excel sources — those are populated via /upload,
+    which enqueues its own job. Not valid for webhook sources — those
+    are enqueued by the webhook receiver.
+    """
+    source = (
+        await db.execute(
+            select(DataSource).where(
+                DataSource.id == dataset_id,
+                DataSource.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+
+    if source.source_type in ("csv", "excel"):
+        raise HTTPException(
+            status_code=400,
+            detail="use /upload for file-based sources",
+        )
+    if source.source_type == "webhook":
+        raise HTTPException(
+            status_code=400,
+            detail="webhook sources are triggered by inbound deliveries",
+        )
+
+    try:
+        job = await ingestion_service.enqueue_ingest(
+            db, tenant_id=tenant_id, source_id=dataset_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    await db.commit()
+    await db.refresh(job)
+    return job

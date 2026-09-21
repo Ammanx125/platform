@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
@@ -13,21 +14,28 @@ from app.db.session import SessionLocal, engine
 from app.main import app
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def reset_rate_limits() -> AsyncGenerator[None]:
+    limiter.reset()
+    yield
+    limiter.reset()
+
+
 @pytest_asyncio.fixture
-async def client() -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def dispose_db_engine() -> AsyncGenerator[None, None]:
+async def dispose_db_engine() -> AsyncGenerator[None]:
     yield
     await engine.dispose()
 
 
 @pytest_asyncio.fixture
-async def two_tenants() -> AsyncGenerator[dict, None]:
+async def two_tenants() -> AsyncGenerator[dict]:
     """Create two tenants with admin users and clean them up after the test."""
     async with SessionLocal() as db:
         await ensure_permission_catalog(db)

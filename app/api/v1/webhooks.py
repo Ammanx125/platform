@@ -15,10 +15,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import crypto
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.services.ingestion import webhook as webhook_service
 
@@ -26,9 +27,11 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 @router.post("/{token}", status_code=status.HTTP_202_ACCEPTED)
+@limiter.limit("120/minute")
 async def receive_webhook(
-    token: str,
     request: Request,
+    response: Response,
+    token: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     x_sansa_signature: str | None = Header(default=None),
 ) -> dict[str, str]:

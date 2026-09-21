@@ -1,0 +1,269 @@
+I001 [*] Import block is un-sorted or un-formatted
+ --> app\core\config.py:2:1
+  |
+1 |   # app/core/config.py
+2 | / from typing import Literal
+3 | |
+4 | | from pydantic_settings import BaseSettings, SettingsConfigDict
+5 | | from pydantic import model_validator
+  | |____________________________________^
+help: Organize imports
+  |
+3 |
+4 + from pydantic import model_validator
+5 | from pydantic_settings import BaseSettings, SettingsConfigDict
+  - from pydantic import model_validator
+6 |
+  |
+
+B904 Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling
+  --> app\core\crypto.py:46:13
+   |
+44 |               if settings.environment == "development":
+45 |                   return Fernet(_derive_key_from_jwt_secret())
+46 | /             raise SansaError(
+47 | |                 f"invalid WEBHOOK_ENC_KEY: {key_str!r}"
+48 | |             )
+   | |_____________^
+49 |
+50 |       if settings.environment != "development":
+   |
+
+UP043 [*] Unnecessary default type arguments
+  --> app\db\session.py:33:23
+   |
+33 | async def get_db() -> AsyncGenerator[AsyncSession, None]:
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+34 |     """FastAPI dependency yielding a scoped async session."""
+35 |     async with SessionLocal() as session:
+   |
+help: Remove default type arguments
+   |
+32 |
+   - async def get_db() -> AsyncGenerator[AsyncSession, None]:
+33 + async def get_db() -> AsyncGenerator[AsyncSession]:
+34 |     """FastAPI dependency yielding a scoped async session."""
+   |
+
+B007 Loop control variable `family` not used within loop body
+  --> app\services\ingestion\http.py:82:9
+   |
+80 |         raise IngestionError(f"no addresses for host {host!r}")
+81 |
+82 |     for family, _, _, _, sockaddr in infos:
+   |         ^^^^^^
+83 |         addr = sockaddr[0]
+84 |         if not isinstance(addr, str):
+   |
+help: Rename unused `family` to `_family`
+
+UP037 [*] Remove quotes from type annotation
+   --> app\services\ingestion\http.py:180:39
+    |
+178 |     source_type = "http"
+179 |
+180 |     async def _fetch(self, *, source: "DataSource") -> tuple[bytes, str]:
+    |                                       ^^^^^^^^^^^^
+181 |         cfg = source.config or {}
+182 |         url = cfg.get("url")
+    |
+help: Remove quotes
+    |
+179 |
+    -     async def _fetch(self, *, source: "DataSource") -> tuple[bytes, str]:
+180 +     async def _fetch(self, *, source: DataSource) -> tuple[bytes, str]:
+181 |         cfg = source.config or {}
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> app\services\ingestion\http.py:276:40
+    |
+274 |         return [dict(zip(header, r, strict=False)) for r in reader]
+275 |
+276 |     async def inspect(self, *, source: "DataSource") -> SourceMetadata:
+    |                                        ^^^^^^^^^^^^
+277 |         raw, fmt = await self._fetch(source=source)
+278 |         if fmt == "json":
+    |
+help: Remove quotes
+    |
+275 |
+    -     async def inspect(self, *, source: "DataSource") -> SourceMetadata:
+276 +     async def inspect(self, *, source: DataSource) -> SourceMetadata:
+277 |         raw, fmt = await self._fetch(source=source)
+    |
+
+UP037 [*] Remove quotes from type annotation
+   --> app\services\ingestion\http.py:294:39
+    |
+292 |         )
+293 |
+294 |     async def ingest(self, *, source: "DataSource") -> IngestionResult:
+    |                                       ^^^^^^^^^^^^
+295 |         raw, fmt = await self._fetch(source=source)
+296 |         if fmt == "json":
+    |
+help: Remove quotes
+    |
+293 |
+    -     async def ingest(self, *, source: "DataSource") -> IngestionResult:
+294 +     async def ingest(self, *, source: DataSource) -> IngestionResult:
+295 |         raw, fmt = await self._fetch(source=source)
+    |
+
+UP043 [*] Unnecessary default type arguments
+  --> tests\conftest.py:17:23
+   |
+16 | @pytest_asyncio.fixture
+17 | async def client() -> AsyncGenerator[AsyncClient, None]:
+   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+18 |     transport = ASGITransport(app=app)
+19 |     async with AsyncClient(transport=transport, base_url="http://test") as c:
+   |
+help: Remove default type arguments
+   |
+16 | @pytest_asyncio.fixture
+   - async def client() -> AsyncGenerator[AsyncClient, None]:
+17 + async def client() -> AsyncGenerator[AsyncClient]:
+18 |     transport = ASGITransport(app=app)
+   |
+
+UP043 [*] Unnecessary default type arguments
+  --> tests\conftest.py:24:34
+   |
+23 | @pytest_asyncio.fixture(autouse=True)
+24 | async def dispose_db_engine() -> AsyncGenerator[None, None]:
+   |                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+25 |     yield
+26 |     await engine.dispose()
+   |
+help: Remove default type arguments
+   |
+23 | @pytest_asyncio.fixture(autouse=True)
+   - async def dispose_db_engine() -> AsyncGenerator[None, None]:
+24 + async def dispose_db_engine() -> AsyncGenerator[None]:
+25 |     yield
+   |
+
+UP043 [*] Unnecessary default type arguments
+  --> tests\conftest.py:30:28
+   |
+29 | @pytest_asyncio.fixture
+30 | async def two_tenants() -> AsyncGenerator[dict, None]:
+   |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+31 |     """Create two tenants with admin users and clean them up after the test."""
+32 |     async with SessionLocal() as db:
+   |
+help: Remove default type arguments
+   |
+29 | @pytest_asyncio.fixture
+   - async def two_tenants() -> AsyncGenerator[dict, None]:
+30 + async def two_tenants() -> AsyncGenerator[dict]:
+31 |     """Create two tenants with admin users and clean them up after the test."""
+   |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests\integration\test_http_connector_live.py:3:1
+  |
+1 |   # tests/integration/test_http_connector_live.py
+2 |   # Not part of the normal suite ΓÇö mark as live/opt-in.
+3 | / import pytest
+4 | | from app.services.ingestion.http import HTTPConnector
+  | |_____________________________________________________^
+help: Organize imports
+  |
+3 | import pytest
+4 +
+5 | from app.services.ingestion.http import HTTPConnector
+  |
+
+I001 [*] Import block is un-sorted or un-formatted
+ --> tests\integration\test_ingest_endpoint.py:2:1
+  |
+1 |   # tests/integration/test_ingest_endpoint.py
+2 | / import pytest
+3 | | from httpx import AsyncClient
+4 | |
+5 | | from app.db.session import SessionLocal
+6 | | from app.services.ingestion.service import run_job
+7 | | from sqlalchemy import select
+8 | | from app.db.models.dataset import IngestionJob
+  | |______________________________________________^
+help: Organize imports
+  |
+3 | from httpx import AsyncClient
+4 + from sqlalchemy import select
+5 |
+6 + from app.db.models.dataset import IngestionJob
+7 | from app.db.session import SessionLocal
+8 | from app.services.ingestion.service import run_job
+  - from sqlalchemy import select
+  - from app.db.models.dataset import IngestionJob
+9 |
+  |
+
+F401 [*] `app.db.session.SessionLocal` imported but unused
+ --> tests\integration\test_ingest_endpoint.py:5:28
+  |
+3 | from httpx import AsyncClient
+4 |
+5 | from app.db.session import SessionLocal
+  |                            ^^^^^^^^^^^^
+6 | from app.services.ingestion.service import run_job
+7 | from sqlalchemy import select
+  |
+help: Remove unused import: `app.db.session.SessionLocal`
+  |
+4 |
+  - from app.db.session import SessionLocal
+5 | from app.services.ingestion.service import run_job
+  |
+
+F401 [*] `app.services.ingestion.service.run_job` imported but unused
+ --> tests\integration\test_ingest_endpoint.py:6:44
+  |
+5 | from app.db.session import SessionLocal
+6 | from app.services.ingestion.service import run_job
+  |                                            ^^^^^^^
+7 | from sqlalchemy import select
+8 | from app.db.models.dataset import IngestionJob
+  |
+help: Remove unused import: `app.services.ingestion.service.run_job`
+  |
+5 | from app.db.session import SessionLocal
+  - from app.services.ingestion.service import run_job
+6 | from sqlalchemy import select
+  |
+
+F401 [*] `sqlalchemy.select` imported but unused
+ --> tests\integration\test_ingest_endpoint.py:7:24
+  |
+5 | from app.db.session import SessionLocal
+6 | from app.services.ingestion.service import run_job
+7 | from sqlalchemy import select
+  |                        ^^^^^^
+8 | from app.db.models.dataset import IngestionJob
+  |
+help: Remove unused import: `sqlalchemy.select`
+  |
+6 | from app.services.ingestion.service import run_job
+  - from sqlalchemy import select
+7 | from app.db.models.dataset import IngestionJob
+  |
+
+F401 [*] `app.db.models.dataset.IngestionJob` imported but unused
+ --> tests\integration\test_ingest_endpoint.py:8:35
+  |
+6 | from app.services.ingestion.service import run_job
+7 | from sqlalchemy import select
+8 | from app.db.models.dataset import IngestionJob
+  |                                   ^^^^^^^^^^^^
+help: Remove unused import: `app.db.models.dataset.IngestionJob`
+  |
+7 | from sqlalchemy import select
+  - from app.db.models.dataset import IngestionJob
+8 |
+  |
+
+Found 16 errors.
+[*] 14 fixable with the `--fix` option (1 hidden fix can be enabled with the `--unsafe-fixes` option).

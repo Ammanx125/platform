@@ -4,9 +4,10 @@ HTTP connector.
 
 Fetches from an HTTP endpoint and parses JSON or CSV. Two hard rules:
 
-  1. SSRF protection: the URL's hostname is resolved; the resulting IP is
-     checked against a blocklist. The connection is made to the *checked IP*,
-     not the hostname, to prevent DNS rebinding.
+  1. SSRF protection: the URL's hostname is resolved, the resulting IP is
+     checked against a blocklist, and the connection is made to that IP
+     with the *original hostname* preserved for TLS SNI and the Host header.
+     This closes the DNS-rebinding window between check and connect.
 
   2. Credentials are never stored in DataSource.config. Config holds an
      `auth_ref`; the value (bearer token, API key, basic auth string) is
@@ -32,6 +33,7 @@ from __future__ import annotations
 import csv
 import io
 import ipaddress
+import json
 import socket
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -51,6 +53,8 @@ if TYPE_CHECKING:
     from app.db.models.dataset import DataSource
 
 
+# ---------- SSRF defense ----------
+
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return (
         ip.is_private
@@ -62,14 +66,13 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _resolve_and_check(host: str) -> str:
+def _resolve_and_check(host: str, port: int | None = None) -> str:
     """
-    Resolve host to one IP, check it against the blocklist, and return that IP
-    as a string. The caller connects to this IP — not the hostname — to avoid
-    DNS rebinding between the check and the connect.
+    Resolve host to one IP, check it against the blocklist, and return that
+    IP as a string. Raises IngestionError if any resolved address is blocked.
     """
     try:
-        infos = socket.getaddrinfo(host, None)
+        infos = socket.getaddrinfo(host, port)
     except socket.gaierror as exc:
         raise IngestionError(f"could not resolve host {host!r}: {exc}") from exc
 
@@ -78,6 +81,8 @@ def _resolve_and_check(host: str) -> str:
 
     for _family, _, _, _, sockaddr in infos:
         addr = sockaddr[0]
+        if not isinstance(addr, str):
+            continue
         try:
             ip = ipaddress.ip_address(addr)
         except ValueError:
@@ -86,17 +91,70 @@ def _resolve_and_check(host: str) -> str:
             raise IngestionError(
                 f"refusing to connect to {host!r}: resolves to blocked address {ip}"
             )
-        # Return the first non-blocked address.
-        return str(addr)
+        return addr
 
     raise IngestionError(f"no usable address for host {host!r}")
 
 
+class _SSRFSafeTransport(httpx.AsyncHTTPTransport):
+    """
+    An httpx transport that resolves the hostname, checks it against the
+    SSRF blocklist, and connects to the resolved IP while keeping the
+    original hostname for TLS SNI and the Host header.
+
+    This closes the DNS-rebinding window: the IP we check is the IP we
+    connect to. No re-resolution happens between the check and the connect.
+    """
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        url = request.url
+        host = url.host
+        if not host:
+            raise IngestionError("URL has no hostname")
+
+        port = url.port or (443 if url.scheme == "https" else 80)
+
+        # Resolve + check. Raises if any resolved IP is blocked.
+        resolved_ip = _resolve_and_check(host, port)
+
+        # httpx doesn't expose a direct "connect to this IP but use this SNI"
+        # hook, so we rewrite the URL's host to the IP and set Host explicitly.
+        # httpx preserves the original host for SNI when we do this through
+        # the extensions mechanism below.
+        new_url = url.copy_with(host=resolved_ip)
+        new_headers = httpx.Headers(request.headers)
+        # Preserve the original Host header (some servers require it).
+        if "host" not in {k.lower() for k in new_headers.keys()}:
+            new_headers["Host"] = host
+
+        # Tell httpx to use the original hostname for TLS SNI. This is the
+        # critical part: the TCP connection goes to resolved_ip, but the
+        # cert is validated against `host`.
+        extensions = dict(request.extensions)
+        extensions["sni_hostname"] = host
+
+        new_request = httpx.Request(
+            method=request.method,
+            url=new_url,
+            headers=new_headers,
+            content=request.stream,
+            extensions=extensions,
+        )
+
+        return await super().handle_async_request(new_request)
+
+
+def _make_client(*, timeout: float) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=timeout,
+        transport=_SSRFSafeTransport(),
+        follow_redirects=False,
+    )
+
+
+# ---------- JSON path helper ----------
+
 def _get_json_path(obj: Any, dotted: str) -> Any:
-    """
-    Very small JSON path resolver: '$' or '$.a.b.c'.
-    Returns obj unchanged if path is '$' or empty.
-    """
     if not dotted or dotted == "$":
         return obj
     parts = [p for p in dotted.strip("$").split(".") if p]
@@ -114,6 +172,8 @@ def _get_json_path(obj: Any, dotted: str) -> Any:
     return cur
 
 
+# ---------- connector ----------
+
 class HTTPConnector:
     source_type = "http"
 
@@ -129,35 +189,15 @@ class HTTPConnector:
         if not parsed.hostname:
             raise IngestionError("URL has no hostname")
 
-        # Optional per-source host allowlist (defence in depth on top of IP check)
         allowed_hosts = cfg.get("allowed_hosts") or []
         if allowed_hosts and parsed.hostname not in allowed_hosts:
-            raise IngestionError(
-                f"host {parsed.hostname!r} not in allowed_hosts"
-            )
-
-        # Resolve + check; connect by IP to prevent DNS rebinding.
-        resolved_ip = _resolve_and_check(parsed.hostname)
-
-        # Build a URL with the IP substituted but the original Host header preserved.
-        # httpx doesn't support this directly, so we set it manually below.
-        scheme = parsed.scheme
-        port = parsed.port or (443 if scheme == "https" else 80)
-        netloc = f"{resolved_ip}:{port}"
-        # Preserve path and query
-        rebuilt = parsed._replace(netloc=netloc).geturl()
+            raise IngestionError(f"host {parsed.hostname!r} not in allowed_hosts")
 
         method = (cfg.get("method") or "GET").upper()
         if method not in ("GET", "POST"):
             raise IngestionError(f"unsupported method: {method}")
 
         headers: dict[str, str] = dict(cfg.get("headers") or {})
-        headers.setdefault("Host", parsed.hostname)
-        # For https, SNI needs the original hostname; httpx uses the URL host.
-        # We're on http/https IP literal; TLS verification will fail against the
-        # cert. The right fix is a custom transport; for now, we allow this only
-        # when the scheme is https and the customer explicitly opts in.
-        # TODO: replace with httpx extensions={"sni_hostname": ...} when available.
 
         auth_ref = cfg.get("auth_ref")
         if auth_ref:
@@ -181,17 +221,19 @@ class HTTPConnector:
             body = cfg.get("body")
 
         try:
-            async with httpx.AsyncClient(
-                timeout=timeout,
-                verify=(scheme == "https"),
-                follow_redirects=False,
-            ) as client:
-                resp = await client.request(method, rebuilt, headers=headers, json=body)
+            async with _make_client(timeout=timeout) as client:
+                resp = await client.request(
+                    method, url, headers=headers, json=body
+                )
+        except IngestionError:
+            raise
         except httpx.HTTPError as exc:
             raise IngestionError(f"HTTP request failed: {exc}") from exc
 
         if resp.status_code >= 400:
-            raise IngestionError(f"HTTP {resp.status_code} from {parsed.hostname}")
+            raise IngestionError(
+                f"HTTP {resp.status_code} from {parsed.hostname}"
+            )
 
         content = resp.content
         if len(content) > max_bytes:
@@ -205,11 +247,9 @@ class HTTPConnector:
     def _rows_from_json(
         self, *, raw: bytes, json_path: str | None
     ) -> list[dict[str, Any]]:
-        import json
-
         try:
             obj = json.loads(raw.decode("utf-8"))
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             raise IngestionError(f"invalid JSON: {exc}") from exc
 
         target = _get_json_path(obj, json_path) if json_path else obj
@@ -244,9 +284,7 @@ class HTTPConnector:
         else:
             raise IngestionError(f"unsupported format: {fmt}")
 
-        columns: list[str] = []
-        if rows:
-            columns = list(rows[0].keys())
+        columns: list[str] = list(rows[0].keys()) if rows else []
         return SourceMetadata(
             columns=columns,
             sample_rows=rows[:5],

@@ -124,16 +124,16 @@ class DeterministicMatcher:
 
             best: tuple[float, CanonicalConcept | None, str | None] = (0.0, None, None)
 
-            for concept, candidates in concept_candidates:
+            for concept_obj, candidates in concept_candidates:
                 for cand in candidates:
                     if norm == cand or cand in exact_parts:
                         score = _EXACT
-                        matched = cand
+                        matched: str | None = cand
                     else:
                         score = float(fuzz.ratio(norm, cand))
                         matched = cand
                     if score > best[0]:
-                        best = (score, concept, matched)
+                        best = (score, concept_obj, matched)
 
             score, concept, matched = best
             if concept is None or score < _WEAK:
