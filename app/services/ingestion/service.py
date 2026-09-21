@@ -25,7 +25,12 @@ def extension_of(filename: str) -> str:
 
 
 def extension_to_source_type(extension: str) -> str:
-    mapping = {".csv": "csv", ".xlsx": "excel", ".xls": "excel"}
+    mapping = {
+        ".csv": "csv",
+        ".xlsx": "excel",
+        ".xls": "excel",
+        ".pdf": "pdf",
+    }
     try:
         return mapping[extension.lower()]
     except KeyError as exc:
@@ -48,6 +53,68 @@ async def enqueue_job(
     await db.flush()
     return job
 
+
+async def _run_pdf_job(
+    db: AsyncSession,
+    *,
+    job: IngestionJob,
+    source: DataSource,
+    lineage_row: IngestionLineage,
+) -> None:
+    """
+    PDF ingestion pipeline. Produces a Document, not StagedRows.
+
+    Reads the file from storage, extracts blocks via PDFLoader, and hands
+    them to knowledge_service.create_document. Writes extraction metadata
+    and any per-page errors to lineage.
+    """
+    from app.services.ingestion.pdf import PDFLoader
+    from app.services.knowledge import service as knowledge_service
+    from app.services.storage.local import storage
+
+    storage_key = source.config.get("storage_key")
+    if not storage_key:
+        raise IngestionError("pdf source has no storage_key in config")
+
+    content = await storage.get(key=storage_key)
+    if not content:
+        raise IngestionError("pdf file is empty")
+
+    loader = PDFLoader()
+    extraction = await loader.extract(content=content)
+
+    # Title: prefer PDF metadata, fall back to source name.
+    title = extraction.title or source.name
+
+    doc_metadata = {
+        **extraction.doc_metadata,
+        "original_filename": source.config.get("original_filename"),
+        "file_size_bytes": len(content),
+    }
+
+    doc = await knowledge_service.create_document(
+        db,
+        tenant_id=job.tenant_id,
+        title=title,
+        content_type="pdf",
+        raw_text="\n\n".join(b.text for b in extraction.blocks if b.text),
+        blocks=extraction.blocks,
+        source_id=source.id,
+        doc_metadata=doc_metadata,
+    )
+
+    # Lineage: page count, chars, extraction errors. The rows_read /
+    # rows_staged fields on the job don't map cleanly to documents, so we
+    # record the page count there and the rest in lineage.
+    job.rows_read = extraction.page_count
+    job.rows_staged = doc.chunk_count
+    lineage_row.errors = extraction.errors
+    lineage_row.source_uri = storage_key
+    lineage_row.byte_size = len(content)
+    lineage_row.file_hash = hash_bytes(content)
+    lineage_row.original_filename = source.config.get("original_filename")
+
+    await db.flush()
 
 async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
     """
@@ -93,6 +160,12 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             result = await webhook_service.process_pending_deliveries(
                 db, job=job
             )
+        elif source.source_type == "pdf":
+            await _run_pdf_job(db, job=job, source=source, lineage_row=lineage_row)
+            job.status = "succeeded"
+            job.finished_at = datetime.now(UTC)
+            await db.commit()
+            return
         else:
             connector = get_connector(source.source_type)
             result = await connector.ingest(source=source)

@@ -53,6 +53,7 @@ dependencies = [
     "structlog>=24.1,<26.0",
     "prometheus-client>=0.20,<1.0",
     "sqlglot>=25.0,<27.0",
+    "pdfplumber>=0.11,<1.0",
 ]
 
 [dependency-groups]

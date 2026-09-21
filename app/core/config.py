@@ -52,13 +52,18 @@ class Settings(BaseSettings):
     # Storage
     upload_dir: str = "./data/uploads"
     max_upload_bytes: int = 25 * 1024 * 1024  # 25 MB
-    allowed_upload_extensions: list[str] = [".csv", ".xlsx", ".xls"]
+    max_pdf_upload_bytes: int = 100 * 1024 * 1024  # 100 MB
+    allowed_upload_extensions: list[str] = [".csv", ".xlsx", ".xls", ".pdf"]
 
     # Ingestion worker
     ingestion_worker_poll_seconds: float = 2.0
     ingestion_worker_batch_size: int = 1
 
-        # SQL connector
+    # PDF ingestion
+    pdf_max_pages: int = 1000
+    pdf_min_chars_per_page: int = 10   # below this, page is treated as image-only
+
+    # SQL connector
     sql_row_limit: int = 10000
     sql_timeout_seconds: int = 30
 

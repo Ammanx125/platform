@@ -129,10 +129,14 @@ async def upload_dataset(
         )
 
     content = await file.read()
-    if len(content) > settings.max_upload_bytes:
+    max_bytes = (
+        settings.max_pdf_upload_bytes if ext == ".pdf"
+        else settings.max_upload_bytes
+    )
+    if len(content) > max_bytes:
         raise HTTPException(
             status_code=413,
-            detail=f"file too large (max {settings.max_upload_bytes} bytes)",
+            detail=f"file too large (max {max_bytes} bytes)",
         )
 
     # Derive source_type from extension. Overrides whatever was passed at create.
@@ -150,7 +154,11 @@ async def upload_dataset(
     )
     await storage.put(key=storage_key, content=content)
 
-    source.config = {**source.config, "storage_key": storage_key}
+    source.config = {
+        **source.config,
+        "storage_key": storage_key,
+        "original_filename": file.filename,
+    }
 
     job = await ingestion_service.enqueue_job(
         db, tenant_id=tenant_id, source_id=source.id
@@ -340,7 +348,7 @@ async def trigger_ingest(
     if source is None:
         raise HTTPException(status_code=404, detail="dataset not found")
 
-    if source.source_type in ("csv", "excel"):
+    if source.source_type in ("csv", "excel", "pdf"):
         raise HTTPException(
             status_code=400,
             detail="use /upload for file-based sources",
