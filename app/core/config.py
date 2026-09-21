@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     # Chunking
     chunk_target_tokens: int = 400
     chunk_overlap_tokens: int = 50
+    chunk_strategy: str = "continuity"
+    chunk_heading_prefix: bool = True
 
 
 settings = Settings()

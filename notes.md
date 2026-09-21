@@ -73,3 +73,11 @@ Min-max normalization per result set. If vector gives scores [0.9, 0.85, 0.7], t
 Duplicate items (a chunk retrieved by both vector and keyword) get merged into one item whose score_components shows both contributions. That's exactly what the field is for.
 
 Weights from config. Tune without redeploying.
+
+Block is frozen. Immutable input to the chunker. The chunker never mutates blocks; it assembles new TextChunks.
+
+is_structural_break() is used by the strict chunker strategy to decide where a chunk can end. A list_item can merge with the next list_item; a heading cannot merge with the previous paragraph.
+
+_normalize_line_whitespace collapses intra-line runs but keeps line boundaries. This matters because a paragraph with intentional line breaks (poetry, address blocks) shouldn't be flattened.
+
+split_into_sentences is approximate on purpose. The comment says so. Replacing it with a real sentence splitter (nltk, spacy) is a future improvement; the current regex covers the common case.

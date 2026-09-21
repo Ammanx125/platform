@@ -13,7 +13,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.knowledge import Chunk, Document
-from app.services.retrieval.chunking import chunk_text
+from app.services.retrieval.blocks import Block, split_into_paragraphs
+from app.services.retrieval.chunking import chunk_blocks
 from app.services.retrieval.embeddings.registry import get_embedding_provider
 
 
@@ -24,22 +25,37 @@ async def create_document(
     title: str,
     content_type: str,
     raw_text: str,
+    blocks: list[Block] | None = None,
     source_id: uuid.UUID | None = None,
     doc_metadata: dict | None = None,
 ) -> Document:
     """
     Create a Document and immediately chunk + embed it.
 
-    Synchronous within the request for Step 7a. If chunking becomes slow
-    (large PDFs, many documents), move it to the worker like ingestion.
+    `blocks` is optional. When provided (e.g. by a PDF loader that knows the
+    document's structure), the chunker respects those blocks. When omitted,
+    raw_text is split into paragraph blocks with a blank-line heuristic.
+
+    Synchronous within the request for now. If chunking becomes slow (large
+    PDFs, many documents), move it to the worker like ingestion.
     """
+    merged_meta = dict(doc_metadata or {})
+    # Stash blocks in metadata so rechunk_document can re-use them without
+    # needing the caller to re-supply them. Kept under a private key so it
+    # doesn't collide with user metadata.
+    if blocks is not None:
+        merged_meta["_blocks"] = [
+            {"text": b.text, "kind": b.kind, "metadata": b.metadata}
+            for b in blocks
+        ]
+
     doc = Document(
         tenant_id=tenant_id,
         source_id=source_id,
         title=title,
         content_type=content_type,
         raw_text=raw_text,
-        doc_metadata=doc_metadata or {},
+        doc_metadata=merged_meta,
         status="processing",
     )
     db.add(doc)
@@ -57,18 +73,43 @@ async def create_document(
     return doc
 
 
+def _blocks_from_document(document: Document) -> list[Block]:
+    """
+    Reconstruct blocks for a document. If the document carries explicit
+    blocks (from a loader), use those. Otherwise synthesize paragraphs
+    from raw_text.
+    """
+    stored = document.doc_metadata.get("_blocks") if document.doc_metadata else None
+    if stored:
+        return [
+            Block(
+                text=b["text"],
+                kind=b.get("kind", "paragraph"),
+                metadata=dict(b.get("metadata", {})),
+            )
+            for b in stored
+        ]
+    return split_into_paragraphs(document.raw_text)
+
+
 async def _chunk_and_embed(db: AsyncSession, *, document: Document) -> None:
     """
-    Chunk the document's raw_text and insert Chunk rows with embeddings.
+    Chunk the document and insert Chunk rows with embeddings.
 
     Replaces any existing chunks (used by both create and re-chunk).
     """
-    # Clear existing chunks first (supports re-chunk)
     await db.execute(delete(Chunk).where(Chunk.document_id == document.id))
 
-    pieces = chunk_text(
-        document.raw_text,
-        metadata={"document_id": str(document.id)},
+    blocks = _blocks_from_document(document)
+
+    strategy = None
+    if document.doc_metadata:
+        strategy = document.doc_metadata.get("chunk_strategy")
+
+    pieces = chunk_blocks(
+        blocks,
+        strategy=strategy,
+        base_metadata={"document_id": str(document.id)},
     )
 
     if not pieces:
