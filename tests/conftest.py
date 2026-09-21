@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.core.security import hash_password
 from app.db.models.tenant import Tenant
@@ -12,6 +14,7 @@ from app.db.models.user import User
 from app.db.seed import ensure_permission_catalog, seed_tenant_roles
 from app.db.session import SessionLocal, engine
 from app.main import app
+from app.services.retrieval.embeddings import registry
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -82,3 +85,12 @@ async def two_tenants() -> AsyncGenerator[dict]:
         await db.delete(ta)
         await db.delete(tb)
         await db.commit()
+
+@pytest.fixture(autouse=True)
+def _force_mock_embeddings(monkeypatch):
+    monkeypatch.setattr(settings, "embedding_provider", "mock", raising=False)
+    # Do NOT override dimensions — the DB column is now vector(1024), and
+    # mock vectors must match.
+    registry.reset_embedding_provider()
+    yield
+    registry.reset_embedding_provider()

@@ -38,6 +38,9 @@ dependencies = [
     "openpyxl>=3.1,<4.0",
     "pypdf>=4.2,<6.0",
 
+    # Embeddings (Step 7b.1)
+    "fastembed>=0.4,<1.0",
+
     # Matching (semantic mapping, Step 5b)
     "rapidfuzz>=3.9,<4.0",
 
@@ -71,6 +74,10 @@ packages = ["app"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "slow: tests that load real models or hit external services",
+]
+addopts = "-m 'not slow'"
 
 [tool.ruff]
 line-length = 100

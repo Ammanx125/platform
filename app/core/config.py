@@ -70,8 +70,11 @@ class Settings(BaseSettings):
     webhook_enc_key: str | None = None
 
     # Retrieval / embeddings
-    embedding_provider: str = "mock"
-    embedding_dimensions: int = 384
+    embedding_provider: str = "local"
+    embedding_model: str = "intfloat/multilingual-e5-large"
+    embedding_dimensions: int = 1024
+    fastembed_cache_dir: str | None = None
+    embedding_batch_size: int = 32
     retrieval_default_top_k: int = 10
     retrieval_vector_weight: float = 0.5
     retrieval_keyword_weight: float = 0.3
