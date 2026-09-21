@@ -4,6 +4,8 @@ Seed the global canonical concept catalog.
 
 Usage:
     python -m scripts.seed_concepts
+
+Idempotent — safe to re-run after editing app/db/seed_concepts.py.
 """
 from __future__ import annotations
 

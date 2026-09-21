@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentTenantId, CurrentUser, require_permission
 from app.db.models.dataset import DataSource
 from app.db.models.semantic import CanonicalConcept, SemanticMapping
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.semantic import (
     CanonicalConceptRead,
@@ -49,7 +50,7 @@ async def _get_source_or_404(
 )
 async def list_concepts(
     db: Annotated[AsyncSession, Depends(get_db)],
-    _user: Annotated[object, Depends(require_permission("knowledge:read"))],
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
 ) -> list[CanonicalConcept]:
     stmt = select(CanonicalConcept).order_by(CanonicalConcept.domain, CanonicalConcept.key)
     return list((await db.execute(stmt)).scalars().all())
@@ -65,7 +66,7 @@ async def list_mappings(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("knowledge:read"))],
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
 ) -> list[SemanticMapping]:
     await _get_source_or_404(db, source_id=dataset_id, tenant_id=tenant_id)
     stmt = (
@@ -88,7 +89,7 @@ async def propose_mappings(
     job_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("knowledge:read"))],
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> ProposeMappingsResponse:
     """
     Run the deterministic matcher against a job's profile and persist
@@ -115,7 +116,7 @@ async def create_mapping(
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: CurrentUser,
-    _perm: Annotated[object, Depends(require_permission("knowledge:read"))],
+    _perm: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> SemanticMapping:
     await _get_source_or_404(db, source_id=dataset_id, tenant_id=tenant_id)
 
@@ -173,7 +174,7 @@ async def update_mapping(
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: CurrentUser,
-    _perm: Annotated[object, Depends(require_permission("knowledge:read"))],
+    _perm: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> SemanticMapping:
     await _get_source_or_404(db, source_id=dataset_id, tenant_id=tenant_id)
 

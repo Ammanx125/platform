@@ -20,6 +20,7 @@ CANONICAL_PERMISSIONS: dict[str, str] = {
     "action:reject":    "Reject a pending action",
     "workflow:manage":  "Create and edit workflows",
     "audit:read":       "View the audit trail",
+    "knowledge:write":  "Create, edit, and delete knowledge documents",
 }
 
 
@@ -81,16 +82,18 @@ async def seed_tenant_roles(db: AsyncSession, *, tenant_id: uuid.UUID) -> dict[s
 
     for name, spec in CANONICAL_ROLES.items():
         if name in existing_roles:
-            continue
-        role = Role(
-            tenant_id=tenant_id,
-            name=name,
-            description=spec["description"],
-            is_system=True,
-        )
+            role = existing_roles[name]
+        else:
+            role = Role(
+                tenant_id=tenant_id,
+                name=name,
+                description=spec["description"],
+                is_system=True,
+            )
+            db.add(role)
+            existing_roles[name] = role
+        # Reconcile permissions
         role.permissions = [perm_by_key[k] for k in spec["permissions"]]
-        db.add(role)
-        existing_roles[name] = role
 
     await db.flush()
     return existing_roles

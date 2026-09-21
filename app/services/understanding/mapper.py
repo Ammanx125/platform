@@ -4,11 +4,11 @@ Orchestration for semantic mapping: load the profile, run the matcher,
 persist proposals.
 
 Rules:
-  - Only propose mappings for columns we haven't already mapped.
-  - Existing mappings (in any status) are never overwritten by a re-run.
-    Human decisions are sticky. Re-running the matcher is additive.
-  - Columns that match nothing are silently skipped; a future "unmapped
-    columns" endpoint (Step 6) surfaces them for review.
+  - Only propose mappings for columns that don't already have one.
+  - Existing mappings (any status) are never overwritten by a re-run.
+    Human decisions are sticky.
+  - Columns the matcher can't confidently resolve are silently skipped.
+    A future "unmapped columns" view surfaces them for review.
 """
 from __future__ import annotations
 
@@ -27,22 +27,19 @@ from app.services.understanding.matcher import (
 )
 
 
-async def _load_columns(
-    db: AsyncSession, *, job_id: uuid.UUID
-) -> list[str]:
-    """
-    Return the source columns for a job, taken from its DataProfile.
-    Raises ValueError if the job or its profile is missing.
-    """
+async def _load_columns(db: AsyncSession, *, job_id: uuid.UUID) -> list[str]:
     profile = (
         await db.execute(
             select(DataProfile).where(DataProfile.job_id == job_id)
         )
     ).scalar_one_or_none()
     if profile is None:
-        raise ValueError(f"no profile for job {job_id}; run the profiler first")
-
-    columns = [c["name"] for c in profile.profile.get("columns", [])]
+        raise ValueError(
+            f"no profile for job {job_id}; run the profiler first"
+        )
+    columns: list[str] = [
+        str(c["name"]) for c in profile.profile.get("columns", [])
+    ]
     return columns
 
 
@@ -53,8 +50,8 @@ async def propose_mappings(
     matcher: SemanticMatcher | None = None,
 ) -> list[SemanticMapping]:
     """
-    Run the matcher against the columns of a job's profile and persist
-    new proposals. Returns the newly created SemanticMapping rows.
+    Run the matcher against the columns of a job's profile and persist new
+    proposals. Returns the newly created SemanticMapping rows.
 
     Existing mappings for the source are left untouched.
     """
@@ -74,8 +71,7 @@ async def propose_mappings(
     if not columns:
         return []
 
-    # Existing mappings for this source — do not propose over them.
-    existing_cols = set(
+    existing_cols: set[str] = set(
         (
             await db.execute(
                 select(SemanticMapping.source_column).where(
@@ -85,9 +81,9 @@ async def propose_mappings(
         ).scalars().all()
     )
 
-    concepts = (
-        await db.execute(select(CanonicalConcept))
-    ).scalars().all()
+    concepts: list[CanonicalConcept] = list(
+        (await db.execute(select(CanonicalConcept))).scalars().all()
+    )
     if not concepts:
         raise ValueError(
             "canonical concept catalog is empty; run scripts.seed_concepts"
@@ -95,7 +91,7 @@ async def propose_mappings(
 
     active_matcher: SemanticMatcher = matcher or DeterministicMatcher()
     proposals: list[MappingProposal] = await active_matcher.propose(
-        columns=columns, concepts=list(concepts)
+        columns=columns, concepts=concepts
     )
 
     created: list[SemanticMapping] = []

@@ -61,3 +61,15 @@ Fernet is authenticated encryption (AES-128-CBC + HMAC-SHA256). Tampering is det
 Dev fallback derives from JWT_SECRET. Two consequences: (1) you don't need a new env var for local dev, (2) if you rotate JWT_SECRET, previously-encrypted webhook secrets become undecryptable — which is fine in dev, and would be a big deal in prod, which is why prod refuses the fallback.
 
 DecryptionError is its own type so callers can distinguish "encrypted but bad key" from "not encrypted at all."
+
+changing embedding_dimensions after the migration is applied requires a new migration (ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(N)), and it invalidates all existing embeddings.
+
+Note: db: Any is a pragmatic choice. Typing it AsyncSession would import SQLAlchemy into a module that's otherwise pure-data. If you'd rather have the real type, change Any to "AsyncSession" with a TYPE_CHECKING import.
+
+Min-max normalization per result set. If vector gives scores [0.9, 0.85, 0.7], they normalize to [1.0, 0.75, 0.0]. The worst item gets 0, even if its raw score was 0.7. That's aggressive but predictable. A softer alternative is z-score normalization; min-max is the standard first choice.
+
+3× candidate multiplier. If you want 10 results, fetch 30 from each retriever. Common IR heuristic; ensures merged top-10 isn't dominated by one strategy.
+
+Duplicate items (a chunk retrieved by both vector and keyword) get merged into one item whose score_components shows both contributions. That's exactly what the field is for.
+
+Weights from config. Tune without redeploying.

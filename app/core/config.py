@@ -69,5 +69,17 @@ class Settings(BaseSettings):
     # Webhook encryption (see crypto decision)
     webhook_enc_key: str | None = None
 
+    # Retrieval / embeddings
+    embedding_provider: str = "mock"
+    embedding_dimensions: int = 384
+    retrieval_default_top_k: int = 10
+    retrieval_vector_weight: float = 0.5
+    retrieval_keyword_weight: float = 0.3
+    retrieval_sql_weight: float = 0.2
+
+    # Chunking
+    chunk_target_tokens: int = 400
+    chunk_overlap_tokens: int = 50
+
 
 settings = Settings()

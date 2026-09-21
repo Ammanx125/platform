@@ -3,14 +3,10 @@
 Semantic matcher: propose a canonical concept for each source column.
 
 Two implementations behind one Protocol:
+  - DeterministicMatcher (this file): exact + fuzzy matching. No LLM.
+  - LLMMatcher (Step 9): LLM-assisted proposals for ambiguous columns.
 
-  - DeterministicMatcher (this file): exact + fuzzy matching against the
-    concept catalog's synonyms and display names. No LLM. Fully testable.
-  - LLMMatcher (Step 9): uses the LLM provider to propose mappings for
-    columns the deterministic matcher can't confidently resolve.
-
-The service layer picks which matcher to use; the rest of the system never
-cares which implementation is active.
+The service layer picks which matcher to use; nothing else cares.
 """
 from __future__ import annotations
 
@@ -21,8 +17,6 @@ from typing import Protocol
 from rapidfuzz import fuzz
 
 from app.db.models.semantic import CanonicalConcept
-
-# --- normalization ---------------------------------------------------------
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -51,14 +45,12 @@ def _normalized_parts(name: str) -> set[str]:
     }
 
 
-# --- result type -----------------------------------------------------------
-
 @dataclass(frozen=True)
 class MappingProposal:
     source_column: str
     canonical_concept_key: str
     confidence: float
-    rationale: dict
+    rationale: dict[str, object]
 
 
 class SemanticMatcher(Protocol):
@@ -70,9 +62,6 @@ class SemanticMatcher(Protocol):
     ) -> list[MappingProposal]: ...
 
 
-# --- deterministic matcher -------------------------------------------------
-
-# Score thresholds for rapidfuzz ratio (0..100).
 _EXACT = 100.0
 _STRONG = 90.0
 _WEAK = 75.0
@@ -83,14 +72,11 @@ class DeterministicMatcher:
     Deterministic matcher: exact, then fuzzy, then give up.
 
     Priority:
-      1. Exact match on a concept's synonym (normalized).
-      2. Exact match on a concept's display name (normalized).
-      3. Fuzzy match >= _STRONG against any synonym or display name.
-      4. Fuzzy match >= _WEAK  against any synonym or display name.
+      1. Exact match on a concept's synonym or display name (normalized).
+      2. Fuzzy match >= _STRONG against any synonym or display name.
+      3. Fuzzy match >= _WEAK  against any synonym or display name.
 
-    A column may be proposed for at most one concept — the highest scoring one.
-    Ties are broken by preferring entity > attribute > fact for entity-ish
-    columns, but in practice ties are rare.
+    Each column maps to at most one concept — the highest-scoring one.
     """
 
     async def propose(
@@ -101,16 +87,16 @@ class DeterministicMatcher:
     ) -> list[MappingProposal]:
         proposals: list[MappingProposal] = []
 
-        # Pre-compute the candidate strings for each concept.
-        # Each concept has: display_name + every synonym, all normalized.
+        # Pre-compute normalized candidate strings per concept.
         concept_candidates: list[tuple[CanonicalConcept, list[str]]] = []
         for c in concepts:
-            candidates = [normalize_column_name(c.display_name)]
-            candidates.extend(normalize_column_name(s) for s in (c.synonyms or []))
-            # dedupe while preserving order
+            raw_candidates = [normalize_column_name(c.display_name)]
+            raw_candidates.extend(
+                normalize_column_name(s) for s in (c.synonyms or [])
+            )
             seen: set[str] = set()
             deduped: list[str] = []
-            for cand in candidates:
+            for cand in raw_candidates:
                 if cand and cand not in seen:
                     seen.add(cand)
                     deduped.append(cand)
@@ -122,38 +108,41 @@ class DeterministicMatcher:
                 continue
             exact_parts = _normalized_parts(col)
 
-            best: tuple[float, CanonicalConcept | None, str | None] = (0.0, None, None)
+            best_score: float = 0.0
+            best_concept: CanonicalConcept | None = None
+            best_matched: str | None = None
 
-            for concept_obj, candidates in concept_candidates:
+            for concept, candidates in concept_candidates:
                 for cand in candidates:
                     if norm == cand or cand in exact_parts:
                         score = _EXACT
-                        matched: str | None = cand
                     else:
                         score = float(fuzz.ratio(norm, cand))
-                        matched = cand
-                    if score > best[0]:
-                        best = (score, concept_obj, matched)
+                    if score > best_score:
+                        best_score = score
+                        best_concept = concept
+                        best_matched = cand
 
-            score, concept, matched = best
-            if concept is None or score < _WEAK:
+            if best_concept is None or best_matched is None:
+                continue
+            if best_score < _WEAK:
                 continue
 
-            if score == _EXACT:
+            if best_score == _EXACT:
                 method = "exact"
-            elif score >= _STRONG:
+            elif best_score >= _STRONG:
                 method = "fuzzy_strong"
             else:
                 method = "fuzzy_weak"
 
             proposals.append(MappingProposal(
                 source_column=col,
-                canonical_concept_key=concept.key,
-                confidence=round(score / 100.0, 4),
+                canonical_concept_key=best_concept.key,
+                confidence=round(best_score / 100.0, 4),
                 rationale={
                     "method": method,
-                    "matched": matched,
-                    "score": round(score, 2),
+                    "matched": best_matched,
+                    "score": round(best_score, 2),
                 },
             ))
 

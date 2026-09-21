@@ -5,11 +5,8 @@ Canonical concept catalog.
 Global (not tenant-scoped). Idempotent: running seed_canonical_concepts()
 repeatedly reconciles the catalog to this file.
 
-~31 concepts across Procurement, Inventory, Finance, Sales, Operations,
-Management. Two hard rules:
-
-  1. No derived metrics. 'Gross Margin' is a KPIDefinition (Step 8),
-     not a CanonicalConcept.
+Two hard rules:
+  1. No derived metrics. 'Gross Margin' is a KPIDefinition (Step 8).
   2. No industry-specific concepts. Those go in Industry Packs (Step 24).
 """
 from __future__ import annotations
@@ -19,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.semantic import CanonicalConcept
 
-# Each entry: (key, display_name, domain, kind, value_type, synonyms, description)
+# (key, display_name, domain, kind, value_type, synonyms, description)
 CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     # ---------- Procurement (5) ----------
     (
@@ -88,7 +85,7 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     ),
     (
         "Finance.Expense", "Expense", "Finance", "attribute", "number",
-        ["expense", "expenses", "cost", "spend", "amount"],
+        ["expense", "expenses", "spend"],
         "An outflow of money to run the business.",
     ),
     (
@@ -115,7 +112,10 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     # ---------- Sales (5) ----------
     (
         "Sales.Customer", "Customer", "Sales", "entity", "entity",
-        ["customer", "customer_name", "client", "client_name", "customer_id", "client_id", "cust_nm"],
+        [
+            "customer", "customer_name", "client", "client_name",
+            "customer_id", "client_id", "cust_nm",
+        ],
         "A party that buys goods or services from the organisation.",
     ),
     (
@@ -190,13 +190,15 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
 ]
 
 
-# Common date/quantity/amount column names that don't warrant a dedicated
-# entity concept but should still map to a typed attribute. These are the
-# "generic" attributes most datasets carry.
+# Generic attributes most datasets carry. Not domain concepts, but needed as
+# mapping targets so common columns like 'date' or 'amount' have a home.
 GENERIC_ATTRIBUTES: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     (
         "Common.Date", "Date", "Common", "attribute", "date",
-        ["date", "transaction_date", "order_date", "invoice_date", "record_date", "created_date"],
+        [
+            "date", "transaction_date", "order_date", "invoice_date",
+            "record_date", "created_date",
+        ],
         "A calendar date associated with a record.",
     ),
     (
@@ -224,14 +226,12 @@ async def seed_canonical_concepts(db: AsyncSession) -> int:
     """
     Idempotent reconciliation of the global canonical concept catalog.
 
-    - Inserts concepts that don't exist.
-    - Updates display_name, description, synonyms, domain, kind, value_type
-      on existing concepts, so edits to this file are picked up on re-run.
-    - Does NOT delete concepts. Manual deletion is a deliberate operation.
+    Inserts concepts that don't exist and updates mutable fields on existing
+    ones (so edits to this file are picked up on re-run). Never deletes.
 
     Returns the number of concepts reconciled (inserted or updated).
     """
-    existing = {
+    existing: dict[str, CanonicalConcept] = {
         c.key: c
         for c in (await db.execute(select(CanonicalConcept))).scalars().all()
     }

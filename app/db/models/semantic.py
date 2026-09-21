@@ -23,8 +23,7 @@ class CanonicalConcept(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
     A business meaning that source data can be mapped to.
 
-    Global (not tenant-scoped): the same 'Customer.name' means the same
-    thing in every tenant. Industry packs extend the catalog with new
+    Global (not tenant-scoped). Industry packs extend this catalog with new
     concepts; they never redefine existing ones.
 
     kind:
@@ -34,9 +33,11 @@ class CanonicalConcept(Base, UUIDPrimaryKeyMixin, TimestampMixin):
                      coordinated columns on one source (mapped by grouping
                      multiple SemanticMapping rows under the same concept)
 
+    value_type:
+      - 'string' | 'number' | 'date' | 'boolean' | 'entity'
+
     Key format: '<Domain>.<Name>' — e.g. 'Procurement.Supplier',
-    'Finance.Revenue', 'Sales.Customer'. The '.' is not required to be
-    parsed anywhere; it's a naming convention.
+    'Finance.Revenue'. Convention only; not parsed.
     """
     __tablename__ = "canonical_concepts"
 
@@ -44,9 +45,9 @@ class CanonicalConcept(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     display_name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     domain: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
-    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # attribute|entity|fact
-    value_type: Mapped[str] = mapped_column(String(20), nullable=False)  # string|number|date|boolean|entity
-    synonyms: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    value_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    synonyms: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
 
 
 class SemanticMapping(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
@@ -58,13 +59,16 @@ class SemanticMapping(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
 
     status:
       - 'proposed': set by the matcher, awaiting human confirmation
-      - 'confirmed': accepted by a human (or by an automatic exact match)
+      - 'confirmed': accepted by a human (or human-authored)
       - 'rejected': explicitly dismissed
 
     confidence:
       - 1.0 for exact-name matches
-      - < 1.0 for fuzzy matches (rapidfuzz ratio)
+      - < 1.0 for fuzzy matches (rapidfuzz ratio / 100)
       - None for manual (human-authored) mappings
+
+    rationale: structured record of *why* the matcher chose this concept.
+      Example: {"method": "exact", "matched": "supplier", "score": 100.0}
     """
     __tablename__ = "semantic_mappings"
 
@@ -88,10 +92,8 @@ class SemanticMapping(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     )
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    # Why this mapping was proposed (for lineage + debugging the matcher)
     rationale: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
-    # Human confirmation bookkeeping
     confirmed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

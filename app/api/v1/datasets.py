@@ -19,6 +19,7 @@ from app.api.deps import CurrentTenantId, require_permission
 from app.core.config import settings
 from app.db.models.dataset import DataSource, IngestionJob
 from app.db.models.understanding import DataProfile
+from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.dataset import (
     DataSourceCreate,
@@ -41,7 +42,7 @@ router = APIRouter(prefix="/datasets", tags=["datasets"])
 async def list_datasets(
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:read"))],
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> list[DataSource]:
     stmt = (
         select(DataSource)
@@ -56,7 +57,7 @@ async def create_dataset(
     body: DataSourceCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> DataSource:
     source = DataSource(
         tenant_id=tenant_id,
@@ -79,7 +80,7 @@ async def get_dataset(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:read"))],
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> DataSource:
     source = (
         await db.execute(
@@ -103,7 +104,7 @@ async def upload_dataset(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
     file: UploadFile = File(...),  # noqa: B008
 ) -> IngestionJob:
     source = (
@@ -164,7 +165,7 @@ async def list_jobs(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:read"))],
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> list[IngestionJob]:
     # Confirm dataset belongs to tenant
     source = (
@@ -195,7 +196,7 @@ async def get_job(
     job_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:read"))],
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> IngestionJob:
     job = (
         await db.execute(
@@ -219,7 +220,7 @@ async def get_job_profile(
     job_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:read"))],
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> DataProfile:
     # Confirm job belongs to this tenant AND this dataset.
     job = (
@@ -255,7 +256,7 @@ async def create_webhook_source(
     body: WebhookSourceCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> WebhookSourceCreated:
     """
     Create a webhook data source.
@@ -288,7 +289,7 @@ async def recompute_job_profile(
     job_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> DataProfile:
     job = (
         await db.execute(
@@ -316,7 +317,7 @@ async def trigger_ingest(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[object, Depends(require_permission("dataset:write"))],
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
 ) -> IngestionJob:
     """
     Enqueue an ingestion for an existing pull source (sql, http).
