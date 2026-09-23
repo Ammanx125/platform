@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentTenantId, require_permission
 from app.db.models.knowledge import Chunk, Document
+from app.db.models.semantic import CanonicalConcept, ConceptRelationship
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.knowledge import (
@@ -21,12 +22,22 @@ from app.schemas.knowledge import (
     SearchRequest,
     SearchResponse,
 )
+from app.schemas.semantic import (
+    CanonicalConceptRead,
+    ConceptNeighbor,
+    ConceptRelationshipRead,
+    ConceptWithRelationships,
+    IndustryPackRead,
+    InstallPackResponse,
+    TenantIndustryPackRead,
+)
 from app.services.knowledge import service as knowledge_service
 from app.services.retrieval.base import RetrievalFilters
 from app.services.retrieval.hybrid import HybridRetriever
 from app.services.retrieval.keyword import KeywordRetriever
 from app.services.retrieval.sql import SQLRetriever
 from app.services.retrieval.vector import VectorRetriever
+from app.services.semantic import packs as packs_service
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -205,4 +216,186 @@ async def search(
             )
             for it in result.items
         ],
+    )
+
+# ---------- concepts and relationships ----------
+
+@router.get(
+    "/concepts/{key}",
+    response_model=ConceptWithRelationships,
+)
+async def get_concept(
+    key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
+) -> ConceptWithRelationships:
+    concept = (
+        await db.execute(
+            select(CanonicalConcept).where(CanonicalConcept.key == key)
+        )
+    ).scalar_one_or_none()
+    if concept is None:
+        raise HTTPException(status_code=404, detail="concept not found")
+
+    outgoing = (
+        await db.execute(
+            select(ConceptRelationship).where(ConceptRelationship.from_key == key)
+        )
+    ).scalars().all()
+    incoming = (
+        await db.execute(
+            select(ConceptRelationship).where(ConceptRelationship.to_key == key)
+        )
+    ).scalars().all()
+
+    return ConceptWithRelationships(
+        concept=CanonicalConceptRead.model_validate(concept),
+        outgoing=[ConceptRelationshipRead.model_validate(rel) for rel in outgoing],
+        incoming=[ConceptRelationshipRead.model_validate(rel) for rel in incoming],
+    )
+
+
+@router.get(
+    "/concepts/{key}/neighbors",
+    response_model=list[ConceptNeighbor],
+)
+async def concept_neighbors(
+    key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
+    depth: int = 1,
+) -> list[ConceptNeighbor]:
+    """
+    BFS from `key` up to `depth` hops. Cycles are handled by tracking
+    visited keys. `depth` is capped to avoid runaway traversals.
+    """
+    if depth < 1 or depth > 5:
+        raise HTTPException(status_code=400, detail="depth must be 1..5")
+
+    start = (
+        await db.execute(
+            select(CanonicalConcept).where(CanonicalConcept.key == key)
+        )
+    ).scalar_one_or_none()
+    if start is None:
+        raise HTTPException(status_code=404, detail="concept not found")
+
+    visited: set[str] = {key}
+    neighbors: list[ConceptNeighbor] = []
+    frontier: list[tuple[str, int]] = [(key, 0)]
+
+    while frontier:
+        current_key, current_depth = frontier.pop(0)
+        if current_depth >= depth:
+            continue
+
+        rels = (
+            await db.execute(
+                select(ConceptRelationship).where(
+                    (ConceptRelationship.from_key == current_key)
+                    | (ConceptRelationship.to_key == current_key)
+                )
+            )
+        ).scalars().all()
+
+        for rel in rels:
+            other_key = rel.to_key if rel.from_key == current_key else rel.from_key
+            if other_key in visited:
+                continue
+            visited.add(other_key)
+
+            other = (
+                await db.execute(
+                    select(CanonicalConcept).where(CanonicalConcept.key == other_key)
+                )
+            ).scalar_one_or_none()
+            if other is None:
+                continue
+
+            neighbors.append(ConceptNeighbor(
+                key=other.key,
+                display_name=other.display_name,
+                domain=other.domain,
+                kind=other.kind,
+                depth=current_depth + 1,
+                via=ConceptRelationshipRead.model_validate(rel),
+            ))
+            frontier.append((other_key, current_depth + 1))
+
+    return neighbors
+
+
+# ---------- industry packs ----------
+
+@router.get(
+    "/industry-packs",
+    response_model=list[IndustryPackRead],
+)
+async def list_industry_packs(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
+) -> list[IndustryPackRead]:
+    packs = await packs_service.list_available_packs(db)
+    return [
+        IndustryPackRead(
+            key=p.key,
+            display_name=p.display_name,
+            description=p.description,
+            version=p.version,
+            concept_count=len(p.concepts or []),
+            relationship_count=len(p.relationships or []),
+        )
+        for p in packs
+    ]
+
+
+@router.get(
+    "/tenants/me/industry-packs",
+    response_model=list[TenantIndustryPackRead],
+)
+async def list_installed_packs(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
+) -> list[TenantIndustryPackRead]:
+    rows = await packs_service.list_installed_packs(db, tenant_id=tenant_id)
+    return [
+        TenantIndustryPackRead(
+            pack_key=pack.key,
+            display_name=pack.display_name,
+            version=pack.version,
+            enabled_at=record.enabled_at,
+        )
+        for pack, record in rows
+    ]
+
+
+@router.post(
+    "/industry-packs/{pack_key}/install",
+    response_model=InstallPackResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def install_industry_pack(
+    pack_key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("knowledge:write"))],
+) -> InstallPackResponse:
+    # Check if already installed before installing, so we can report
+    # `already_installed` accurately.
+    pre = await packs_service.list_installed_packs(db, tenant_id=tenant_id)
+    already = any(p.key == pack_key for p, _ in pre)
+
+    try:
+        record = await packs_service.install_pack(
+            db, tenant_id=tenant_id, pack_key=pack_key
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    await db.commit()
+    return InstallPackResponse(
+        pack_key=record.pack_key,
+        enabled_at=record.enabled_at,
+        already_installed=already,
     )

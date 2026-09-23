@@ -81,3 +81,6 @@ is_structural_break() is used by the strict chunker strategy to decide where a c
 _normalize_line_whitespace collapses intra-line runs but keeps line boundaries. This matters because a paragraph with intentional line breaks (poetry, address blocks) shouldn't be flattened.
 
 split_into_sentences is approximate on purpose. The comment says so. Replacing it with a real sentence splitter (nltk, spacy) is a future improvement; the current regex covers the common case.
+
+One important design point: the concepts list for procurement.v1 mostly references existing catalog entries ({"key": "Procurement.Supplier"}). Only Procurement.RFQ is defined inline because it's new. This is deliberate: a pack doesn't redefine a concept that's already in the base catalog; it just declares "these concepts are part of me" so installation knows what to link in. The install_pack function (next section) handles both cases.
+

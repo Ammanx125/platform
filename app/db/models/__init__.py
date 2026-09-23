@@ -8,7 +8,13 @@ from app.db.models.dataset import (
 from app.db.models.knowledge import Chunk, Document
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.role import Permission, Role, role_permissions, user_roles
-from app.db.models.semantic import CanonicalConcept, SemanticMapping
+from app.db.models.semantic import (
+    CanonicalConcept,
+    ConceptRelationship,
+    IndustryPack,
+    SemanticMapping,
+    TenantIndustryPack,
+)
 from app.db.models.tenant import Tenant
 from app.db.models.understanding import DataProfile
 from app.db.models.user import User
@@ -29,6 +35,9 @@ __all__ = [
     "DataProfile",
     "CanonicalConcept",
     "SemanticMapping",
+    "ConceptRelationship",
+    "IndustryPack",
+    "TenantIndustryPack",
     "WebhookDelivery",
     "Document",
     "Chunk",
