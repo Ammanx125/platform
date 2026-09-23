@@ -1,4 +1,5 @@
 # app/db/models/__init__.py
+from app.db.models.analytics import KPIDefinition
 from app.db.models.dataset import (
     DataSource,
     IngestionJob,
@@ -41,4 +42,5 @@ __all__ = [
     "WebhookDelivery",
     "Document",
     "Chunk",
+    "KPIDefinition",
 ]

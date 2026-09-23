@@ -84,3 +84,10 @@ split_into_sentences is approximate on purpose. The comment says so. Replacing i
 
 One important design point: the concepts list for procurement.v1 mostly references existing catalog entries ({"key": "Procurement.Supplier"}). Only Procurement.RFQ is defined inline because it's new. This is deliberate: a pack doesn't redefine a concept that's already in the base catalog; it just declares "these concepts are part of me" so installation knows what to link in. The install_pack function (next section) handles both cases.
 
+__source_id is injected into every row dict. It's a private key that shouldn't collide with real data. If a customer's CSV literally has a column named __source_id, this breaks — but that's sufficiently unlikely, and the fix (using a tuple) is uglier than the naming convention.
+
+row_limit=100_000 on load. This is the load-time safety cap. Aggregating more than that in Python becomes slow; if a tenant hits it, the right answer is SQL-side aggregation (a future step). For now, cap and note it.
+
+group_by requires confirmed mappings for all grouping concepts. Rows whose source lacks a grouping mapping are skipped rather than put into a "no group" bucket. This keeps the group keys clean.
+
+_to_float strips currency symbols and thousands separators. Deliberately permissive. If the value can't be coerced, skipped++.
