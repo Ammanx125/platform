@@ -169,6 +169,21 @@ async def upload_dataset(
         storage_key=storage_key,
     )
 
+    from app.services.events import store as events_store
+    from app.services.events import types as event_types
+
+    await events_store.record_event(
+        db,
+        tenant_id=tenant_id,
+        event_type=event_types.FILE_OBSERVED,
+        source_id=source.id,
+        payload={
+            "path": file.filename or storage_key,
+            "byte_size": len(content),
+        },
+        dedup_key=f"file.observed:{storage_key}",
+    )
+
     source.config = {
         **source.config,
         "storage_key": storage_key,

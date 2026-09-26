@@ -139,6 +139,7 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         job.finished_at = datetime.now(UTC)
         await db.commit()
         return
+    source_id = source.id
 
     job.status = "running"
     job.started_at = datetime.now(UTC)
@@ -164,6 +165,22 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             await _run_pdf_job(db, job=job, source=source, lineage_row=lineage_row)
             job.status = "succeeded"
             job.finished_at = datetime.now(UTC)
+            from app.services.events import store as events_store
+            from app.services.events import types as event_types
+
+            await events_store.record_event(
+                db,
+                tenant_id=job.tenant_id,
+                event_type=event_types.INGESTION_COMPLETED,
+                source_id=source.id,
+                payload={
+                    "job_id": str(job.id),
+                    "rows_read": job.rows_read,
+                    "rows_staged": job.rows_staged,
+                    "source_type": source.source_type,
+                },
+                dedup_key=f"ingestion.completed:{job.id}",
+            )
             await db.commit()
             return
         else:
@@ -213,6 +230,22 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
 
         job.status = "succeeded"
         job.finished_at = datetime.now(UTC)
+        from app.services.events import store as events_store
+        from app.services.events import types as event_types
+
+        await events_store.record_event(
+            db,
+            tenant_id=job.tenant_id,
+            event_type=event_types.INGESTION_COMPLETED,
+            source_id=source.id,
+            payload={
+                "job_id": str(job.id),
+                "rows_read": job.rows_read,
+                "rows_staged": job.rows_staged,
+                "source_type": source.source_type,
+            },
+            dedup_key=f"ingestion.completed:{job.id}",
+        )
         await db.commit()
 
     except Exception as exc:  # noqa: BLE001
@@ -225,6 +258,20 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             job.status = "failed"
             job.error_message = str(exc)[:2000]
             job.finished_at = datetime.now(UTC)
+            from app.services.events import store as events_store
+            from app.services.events import types as event_types
+
+            await events_store.record_event(
+                db,
+                tenant_id=job.tenant_id,
+                event_type=event_types.INGESTION_FAILED,
+                source_id=source_id,
+                payload={
+                    "job_id": str(job.id),
+                    "error": str(exc)[:500],
+                },
+                dedup_key=f"ingestion.failed:{job.id}",
+            )
             await db.commit()
 
 

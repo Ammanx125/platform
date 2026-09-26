@@ -143,6 +143,24 @@ async def run_detector(
                 persisted.append(row)
 
     await db.flush()
+    if persisted:
+        from app.services.events import store as events_store
+        from app.services.events import types as event_types
+
+        await events_store.record_event(
+            db,
+            tenant_id=tenant_id,
+            event_type=event_types.DETECTOR_FIRED,
+            payload={
+                "detector_key": detector_key,
+                "anomaly_count": len(persisted),
+                "anomaly_ids": [str(anomaly.id) for anomaly in persisted],
+            },
+            dedup_key=(
+                f"detector.fired:{detector_key}:"
+                f"{persisted[0].point_timestamp.isoformat()}"
+            ),
+        )
     return persisted
 
 

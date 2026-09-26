@@ -30,6 +30,7 @@ from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 from app.db.models.webhook import WebhookDelivery
 from app.db.models.workflow import WorkflowInstance
+from app.db.models.event import Event
 
 __all__ = [
     "Tenant",
@@ -62,4 +63,5 @@ __all__ = [
     "AuditEvent",
     "TenantToolPolicy",
     "WorkflowInstance",
+    "Event",
 ]

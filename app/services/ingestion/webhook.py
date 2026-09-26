@@ -160,6 +160,21 @@ async def record_delivery(
         delivery.job_id = existing.id
 
     await db.flush()
+    from app.services.events import store as events_store
+    from app.services.events import types as event_types
+
+    await events_store.record_event(
+        db,
+        tenant_id=source.tenant_id,
+        event_type=event_types.WEBHOOK_RECEIVED,
+        source_id=source.id,
+        payload={
+            "delivery_id": str(delivery.id),
+            "job_id": str(delivery.job_id) if delivery.job_id else None,
+            "size_bytes": len(raw_body),
+        },
+        dedup_key=f"webhook.received:{delivery.id}",
+    )
     return delivery
 
 
