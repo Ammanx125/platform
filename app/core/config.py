@@ -16,11 +16,6 @@ class Settings(BaseSettings):
     access_token_minutes: int = 15
     refresh_token_days: int = 14
 
-    llm_provider: str = "mock"
-    llm_api_key: str = "INVALID_LOCAL_KEY"
-    llm_base_url: str = "http://127.0.0.1:8001/v1"
-    model_name: str = "gemma-4-26b-a4b-it"
-
     # Database pool
     db_pool_size: int = 10
     db_max_overflow: int = 20
@@ -101,6 +96,14 @@ class Settings(BaseSettings):
     forecast_acf_peak_threshold: float = 0.3
     forecast_reliability_high_max_rel_error: float = 0.05
     forecast_reliability_medium_max_rel_error: float = 0.15
+
+    # LLM
+    llm_provider: str = "mock"
+    llm_api_key: str = "INVALID_LOCAL_KEY"
+    llm_base_url: str = "http://127.0.0.1:8001/v1"
+    model_name: str = "gemma-4-26b-a4b-it"
+    llm_request_timeout_seconds: int = 60
+    llm_max_retries: int = 2
 
 
 # BaseSettings loads required values from the environment at runtime.

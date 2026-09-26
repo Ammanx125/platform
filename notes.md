@@ -104,3 +104,10 @@ Irregular series are refused seasonality. ACF assumes regular spacing; on irregu
 
 max_period scales with series length (n * 0.33), because you can't detect a period longer than the series can contain.
 
+response is injectable. Tests use MockLLMProvider(response=LLMResponse(...)).
+
+system, messages, tools are accepted but ignored. The signature has to match the Protocol; the mock doesn't care about the values. That's the point.
+
+The default is deterministic. Same output every call, every time, regardless of input.
+
+No copying of raw — it's whatever the injector set, including None.
