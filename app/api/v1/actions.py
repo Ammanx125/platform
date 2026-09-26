@@ -12,7 +12,8 @@ from app.api.deps import CurrentTenantId, require_permission
 from app.db.models.action import ActionRecord
 from app.db.models.user import User
 from app.db.session import get_db
-from app.schemas.action import ActionRecordRead
+from app.schemas.action import ActionRecordRead, ActionRejectRequest
+from app.services.actions import approval as approval_service
 
 router = APIRouter(prefix="/actions", tags=["actions"])
 
@@ -58,3 +59,46 @@ async def get_action(
     if row is None:
         raise HTTPException(status_code=404, detail="action not found")
     return ActionRecordRead.model_validate(row)
+
+@router.post("/{action_id}/approve", response_model=ActionRecordRead)
+async def approve_action(
+    action_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    user: Annotated[User, Depends(require_permission("action:approve"))],
+) -> ActionRecordRead:
+    try:
+        record = await approval_service.approve(
+            db,
+            action_id=action_id,
+            tenant_id=tenant_id,
+            approver_user_id=user.id,
+        )
+    except approval_service.ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(record)
+    return ActionRecordRead.model_validate(record)
+
+
+@router.post("/{action_id}/reject", response_model=ActionRecordRead)
+async def reject_action(
+    action_id: uuid.UUID,
+    body: ActionRejectRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    user: Annotated[User, Depends(require_permission("action:reject"))],
+) -> ActionRecordRead:
+    try:
+        record = await approval_service.reject(
+            db,
+            action_id=action_id,
+            tenant_id=tenant_id,
+            rejector_user_id=user.id,
+            reason=body.reason,
+        )
+    except approval_service.ApprovalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(record)
+    return ActionRecordRead.model_validate(record)

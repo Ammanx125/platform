@@ -1,13 +1,18 @@
 # app/services/actions/service.py
 """
-Action handling: validate, authorize, execute.
+Action handling: validate, authorize, resolve policy, execute, verify.
 
-The single entry point is handle_proposals(), called by the orchestrator
-after the LLM produces tool calls.
+Two entry points:
 
-Every proposal — valid, invalid, authorized, unauthorized, executed,
-rejected — produces exactly one ActionRecord. Rejects are first-class: they
-show what was proposed and why Sansa refused.
+  handle_proposals()      — called by the orchestrator with the LLM's tool
+                            calls. Full pipeline: validate, authorize, risk
+                            policy, execute (or queue for approval), verify.
+
+  execute_approved()      — called by approval.py when a pending_approval
+                            record is approved. Runs execute() and verify().
+
+Every proposal produces exactly one ActionRecord, regardless of outcome.
+Every state transition emits an AuditEvent.
 """
 from __future__ import annotations
 
@@ -20,20 +25,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.action import ActionRecord
 from app.db.models.user import User
+from app.services.actions.audit import emit_event
 from app.services.actions.base import (
+    RISK_CONFIGURABLE,
     RISK_ELEVATED,
+    RISK_READ,
+    RISK_REPORT,
     RISK_REQUIRED,
     ActionContext,
     ActionError,
+    VerificationOutcome,
 )
 from app.services.actions.registry import get as get_action
 from app.services.actions.validators import run_validators
 from app.services.llm.schemas import ToolCall
 
-# Risk levels that always require approval. In 11a we can't obtain approval,
-# so tools at these levels are rejected rather than executed. 11b flips
-# this to "route to pending_approval" and lets the approval flow run.
-_APPROVAL_REQUIRED_LEVELS = {RISK_REQUIRED, RISK_ELEVATED}
+# Risk levels that execute immediately without human approval.
+_AUTO_EXECUTE_LEVELS = {RISK_READ, RISK_REPORT, RISK_CONFIGURABLE}
+
+
+def _requires_approval(risk_level: str) -> bool:
+    """
+    In 11b, approval is required for levels in {required, elevated}.
+
+    configurable is treated as auto-execute for now — a tenant-specific
+    override table (TenantToolPolicy) will change this on a per-tenant basis
+    in a future step.
+    """
+    return risk_level in {RISK_REQUIRED, RISK_ELEVATED}
 
 
 async def handle_proposals(
@@ -84,6 +103,7 @@ async def _handle_one(
             "schema": {"passed": False, "error": "unknown tool"},
             "permission": {"passed": False, "error": "unknown tool"},
         }
+        await _audit_rejected(db, record=record, context=context)
         return record
 
     # 2. Schema validation.
@@ -97,13 +117,10 @@ async def _handle_one(
             "permission": {"passed": False, "error": "not evaluated"},
             "risk_level": action.risk_level,
         }
+        await _audit_rejected(db, record=record, context=context)
         return record
 
     # 3. Permission check.
-    # A tool's risk level determines who can invoke it. In 11a we don't
-    # have per-tool permission grants; we enforce tenant membership only,
-    # which the orchestrator already established by providing a valid user.
-    # A future iteration adds a permission:action keyed on the tool name.
     user = (
         await db.execute(select(User).where(User.id == context.user_id))
     ).scalar_one_or_none()
@@ -115,6 +132,7 @@ async def _handle_one(
             "permission": {"passed": False, "error": "tenant mismatch or inactive"},
             "risk_level": action.risk_level,
         }
+        await _audit_rejected(db, record=record, context=context)
         return record
 
     # 4. Per-concern validators.
@@ -138,27 +156,108 @@ async def _handle_one(
             for name, out in validation_runs
         ],
     }
+    record.validation_result = validation_result
 
     if failed is not None:
         record.status = "rejected"
         record.rejection_reason = failed[1].error or "validator failed"
-        record.validation_result = validation_result
+        await _audit_rejected(db, record=record, context=context)
         return record
 
-    # 5. Approval gate (stub in 11a).
-    if action.risk_level in _APPROVAL_REQUIRED_LEVELS:
-        # 11a cannot obtain approval; reject cleanly with a message that
-        # tells the caller the tool exists and why it wasn't run.
-        record.status = "rejected"
-        record.rejection_reason = (
-            f"tool {action.name!r} requires approval; "
-            f"approval workflow is not enabled in this deployment"
+    # 5. Risk policy: auto-execute or queue for approval.
+    if _requires_approval(action.risk_level):
+        record.status = "pending_approval"
+        validation_result["requires_approval"] = True
+        record.validation_result = validation_result
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=context.tenant_id,
+            event_type="action.pending_approval",
+            actor_user_id=context.user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={
+                "tool_name": record.tool_name,
+                "risk_level": action.risk_level,
+            },
+            message=f"{action.name} queued for approval",
         )
-        validation_result["would_require_approval"] = True
-        record.validation_result = validation_result
         return record
 
-    # 6. Execute.
+    # 6. Auto-execute.
+    await _run_and_verify(db, record=record, action=action, payload=payload, context=context)
+    return record
+
+
+async def execute_approved(
+    db: AsyncSession,
+    *,
+    record: ActionRecord,
+    actor_user_id,
+) -> ActionRecord:
+    """
+    Execute a previously pending_approval record. Called by approval.py
+    after approval is recorded.
+
+    The record is expected to already have status='approved'. This function
+    re-loads the action, re-validates the arguments (defensive — someone
+    could have edited the record), and runs the pipeline.
+    """
+    action = get_action(record.tool_name)
+    if action is None:
+        record.status = "failed"
+        record.error_message = f"tool {record.tool_name!r} no longer registered"
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=record.tenant_id,
+            event_type="action.failed",
+            actor_user_id=actor_user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={"reason": "tool no longer registered"},
+        )
+        return record
+
+    try:
+        payload = action.parameters_model.model_validate(record.arguments)
+    except ValidationError as exc:
+        record.status = "failed"
+        record.error_message = f"arguments no longer valid: {exc}"
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=record.tenant_id,
+            event_type="action.failed",
+            actor_user_id=actor_user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={"reason": "arguments invalid at execution time"},
+        )
+        return record
+
+    context = ActionContext(
+        tenant_id=record.tenant_id,
+        user_id=record.user_id,
+        decision_run_id=record.decision_run_id,
+    )
+    await _run_and_verify(db, record=record, action=action, payload=payload, context=context)
+    return record
+
+
+async def _run_and_verify(
+    db: AsyncSession,
+    *,
+    record: ActionRecord,
+    action,
+    payload,
+    context: ActionContext,
+) -> None:
+    """
+    Execute the action, then verify it. Updates the record in place.
+    The caller is responsible for committing.
+    """
     record.status = "executing"
     record.started_at = datetime.now(UTC)
     t0 = time.perf_counter()
@@ -169,16 +268,104 @@ async def _handle_one(
         record.status = "failed"
         record.error_message = str(exc)
         record.execution_result = {"error": str(exc)}
+        record.finished_at = datetime.now(UTC)
+        record.duration_ms = int((time.perf_counter() - t0) * 1000)
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=context.tenant_id,
+            event_type="action.failed",
+            actor_user_id=context.user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={"error": str(exc), "tool_name": record.tool_name},
+        )
+        return
     except Exception as exc:  # noqa: BLE001
         record.status = "failed"
         record.error_message = f"unexpected error: {exc}"
         record.execution_result = {"error": str(exc)}
-    else:
+        record.finished_at = datetime.now(UTC)
+        record.duration_ms = int((time.perf_counter() - t0) * 1000)
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=context.tenant_id,
+            event_type="action.failed",
+            actor_user_id=context.user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={"error": str(exc), "tool_name": record.tool_name},
+        )
+        return
+
+    record.execution_result = {"output": result.output}
+
+    # Verify.
+    verification: VerificationOutcome = await action.verify(
+        db=db,
+        payload=payload,
+        context=context,
+        result=result,
+    )
+    record.verification_result = {
+        "verified": verification.verified,
+        "detail": verification.detail,
+        "error": verification.error,
+    }
+    record.verification_error = verification.error
+    record.verified_at = datetime.now(UTC)
+
+    if verification.verified:
         record.status = "executed"
-        record.execution_result = {"output": result.output}
+    else:
+        # The side effect may or may not have happened; verification could
+        # not confirm it. The record is honest about this.
+        record.status = "verification_failed"
 
     record.finished_at = datetime.now(UTC)
     record.duration_ms = int((time.perf_counter() - t0) * 1000)
-    record.validation_result = validation_result
     await db.flush()
-    return record
+
+    event_type = (
+        "action.executed" if verification.verified
+        else "action.verification_failed"
+    )
+    await emit_event(
+        db,
+        tenant_id=context.tenant_id,
+        event_type=event_type,
+        actor_user_id=context.user_id,
+        subject_type="action",
+        subject_id=record.id,
+        metadata={
+            "tool_name": record.tool_name,
+            "verified": verification.verified,
+            "duration_ms": record.duration_ms,
+        },
+        message=(
+            f"{record.tool_name} executed"
+            + ("" if verification.verified else " but verification failed")
+        ),
+    )
+
+
+async def _audit_rejected(
+    db: AsyncSession,
+    *,
+    record: ActionRecord,
+    context: ActionContext,
+) -> None:
+    await emit_event(
+        db,
+        tenant_id=context.tenant_id,
+        event_type="action.rejected",
+        actor_user_id=context.user_id,
+        subject_type="action",
+        subject_id=record.id,
+        metadata={
+            "tool_name": record.tool_name,
+            "reason": record.rejection_reason,
+        },
+        message=record.rejection_reason,
+    )

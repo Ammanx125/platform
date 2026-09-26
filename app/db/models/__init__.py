@@ -5,6 +5,7 @@ from app.db.models.analytics import (
     AnomalyDetectorDefinition,
     KPIDefinition,
 )
+from app.db.models.audit import AuditEvent
 from app.db.models.dataset import (
     DataSource,
     IngestionJob,
@@ -56,4 +57,5 @@ __all__ = [
     "RowTimestamp",
     "DecisionRun",
     "ActionRecord",
+    "AuditEvent",
 ]

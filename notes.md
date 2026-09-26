@@ -85,3 +85,8 @@ run_validators catches exceptions. A malformed validator doesn't crash the whole
 
 Stops at first failure. Matches the standard policy pipeline. If you'd rather collect all failures (some auditors prefer this), change break to continue. I'd keep the short-circuit — later checks may be meaningless if earlier ones fail.
 
+_run_and_verify is shared between the auto-execute path and the approved path. Same code, same verification, same audit emission.
+
+Audit events are emitted at every transition: proposed→pending, proposed→rejected, proposed→executed, approved→executed, approved→verification_failed, approved→failed.
+
+verification_failed is a distinct status. It says: "we ran it, we can't confirm it happened." That's different from failed (we know it didn't run).

@@ -14,6 +14,7 @@ from app.services.actions.base import (
     ActionContext,
     ActionResult,
     ValidationOutcome,
+    VerificationOutcome,
 )
 from app.services.actions.registry import register
 
@@ -82,6 +83,17 @@ class SupplierDetailAction:
             "name": row.name,
             "source_type": row.source_type,
         })
+
+    async def verify(
+        self,
+        *,
+        db: Any,
+        payload: SupplierDetailParams,
+        context: ActionContext,
+        result: ActionResult,
+    ) -> VerificationOutcome:
+        """Read-only tools produce no side effect; verification is trivial."""
+        return VerificationOutcome(verified=True, detail={"readonly": True})
 
 
 register(SupplierDetailAction())

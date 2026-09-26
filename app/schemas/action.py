@@ -24,5 +24,12 @@ class ActionRecordRead(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     duration_ms: int
+    verification_result: dict[str, Any]
+    verification_error: str | None
+    verified_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class ActionRejectRequest(BaseModel):
+    reason: str | None = None

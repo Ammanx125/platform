@@ -22,10 +22,12 @@ class ActionRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     wanted to do and why Sansa refused.
 
     status lifecycle:
-      pending_approval → (11b) approved → executed | failed
-      rejected         → terminal (validation, authorization, or policy refusal)
-      executed         → terminal (success)
-      failed           → terminal (execution error)
+            pending_approval → approved → executed | failed | verification_failed
+            pending_approval → rejected
+            rejected         → terminal
+            executed         → terminal (verification passed or was skipped)
+            verification_failed → terminal (side effect may have occurred)
+            failed           → terminal (execution error before side effect)
 
     In Step 11a only "rejected" and "executed" are produced. The approval
     columns exist for 11b and stay null until then.
@@ -88,3 +90,15 @@ class ActionRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         DateTime(timezone=True), nullable=True
     )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Post-action verification. In 11b, verify() runs after a successful
+    # execute(); the outcome is recorded here. A verification failure does
+    # NOT roll back the side effect — Sansa reports "executed but not
+    # verified" so the record reflects reality.
+    verification_result: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    verification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

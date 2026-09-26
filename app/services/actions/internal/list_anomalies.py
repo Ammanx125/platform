@@ -11,6 +11,7 @@ from app.services.actions.base import (
     ActionContext,
     ActionResult,
     ValidationOutcome,
+    VerificationOutcome,
 )
 from app.services.actions.registry import register
 from app.services.analytics import anomalies as anomalies_service
@@ -73,6 +74,17 @@ class ListAnomaliesAction:
                 for a in rows
             ],
         })
+
+    async def verify(
+        self,
+        *,
+        db: Any,
+        payload: ListAnomaliesParams,
+        context: ActionContext,
+        result: ActionResult,
+    ) -> VerificationOutcome:
+        """Read-only tools produce no side effect; verification is trivial."""
+        return VerificationOutcome(verified=True, detail={"readonly": True})
 
 
 register(ListAnomaliesAction())

@@ -1,6 +1,4 @@
 # tests/unit/actions/test_registry.py
-
-
 from app.services.actions import registry
 
 

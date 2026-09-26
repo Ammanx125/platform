@@ -67,6 +67,21 @@ class ActionResult:
     output: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class VerificationOutcome:
+    """
+    The result of post-action verification.
+
+    verified: True if the side effect was confirmed to have happened.
+    detail:   structured data for the audit trail (what was checked, what
+              was found).
+    error:    human-readable reason if verification failed; None otherwise.
+    """
+    verified: bool
+    detail: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+
+
 class ActionError(Exception):
     """Raised by execute() when the tool cannot complete."""
 
@@ -90,8 +105,12 @@ class Action(Protocol):
                           is derived from it
       - validators:  class-level list of Validator functions
       - execute():   performs the operation against a DB session
+            - verify():    confirms that a successful execute() actually had its
+                                         effect. Called only after execute() returns without
+                                         raising. Read-only tools typically return
+                                         VerificationOutcome(verified=True) immediately.
 
-    Validators run BEFORE execute. Any failure short-circuits the pipeline.
+        Validators run BEFORE execute. verify() runs AFTER execute.
     """
     name: ClassVar[str]
     description: ClassVar[str]
@@ -106,6 +125,15 @@ class Action(Protocol):
         payload: BaseModel,
         context: ActionContext,
     ) -> ActionResult: ...
+
+    async def verify(
+        self,
+        *,
+        db: Any,
+        payload: BaseModel,
+        context: ActionContext,
+        result: ActionResult,
+    ) -> VerificationOutcome: ...
 
 
 # Risk levels. Used by 11b's approval gate; declared here so tools can
