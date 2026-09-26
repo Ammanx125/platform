@@ -105,6 +105,13 @@ class Settings(BaseSettings):
     llm_request_timeout_seconds: int = 60
     llm_max_retries: int = 2
 
+    # Security / redaction
+    log_redaction_enabled: bool = True
+
+    # Prompt safety
+    prompt_injection_score_threshold: float = 0.5
+    prompt_untrusted_delimiter: bool = True
+
 
 # BaseSettings loads required values from the environment at runtime.
 settings = Settings()  # pyright: ignore[reportCallIssue]

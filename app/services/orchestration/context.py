@@ -61,18 +61,21 @@ class EvidenceItem:
     """
     One piece of evidence shown to the LLM.
 
-    kind:   "chunk" | "kpi" | "anomaly" | "forecast"
-    id:     stable identifier the LLM can cite in claims[].evidence_ids
-    text:   the evidence rendered as text for prose sections
-    data:   the structured payload (for the JSON section)
-    score:  optional relevance score
+    kind:             "chunk" | "kpi" | "anomaly" | "forecast"
+    id:               stable identifier the LLM can cite in claims[].evidence_ids
+    text:             the evidence rendered as text for prose sections
+    data:             the structured payload (for the JSON section)
+    score:            optional relevance score
+    injection_flags:  signal names from the injection scanner. Non-empty
+                      means the content was flagged as suspicious. The
+                      content is still delivered to the LLM, wrapped.
     """
     kind: str
     id: str
     text: str
     data: dict[str, Any]
     score: float | None = None
-
+    injection_flags: list[str] = field(default_factory=list)
 
 @dataclass
 class Evidence:
@@ -92,11 +95,16 @@ class Evidence:
         return [*self.chunks, *self.kpis, *self.anomalies, *self.forecasts]
 
     def to_dict(self) -> dict[str, Any]:
+        def _wrap(item: EvidenceItem) -> dict[str, Any]:
+            d = dict(item.data)
+            if item.injection_flags:
+                d["_injection_flags"] = item.injection_flags
+            return d
         return {
-            "chunks": [item.data for item in self.chunks],
-            "kpis": [item.data for item in self.kpis],
-            "anomalies": [item.data for item in self.anomalies],
-            "forecasts": [item.data for item in self.forecasts],
+            "chunks": [_wrap(i) for i in self.chunks],
+            "kpis": [_wrap(i) for i in self.kpis],
+            "anomalies": [_wrap(i) for i in self.anomalies],
+            "forecasts": [_wrap(i) for i in self.forecasts],
             "capability_errors": self.capability_errors,
         }
 

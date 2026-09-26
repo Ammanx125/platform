@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.security.redaction import redact_dict
 
 from app.db.models.audit import AuditEvent
 
@@ -38,7 +39,7 @@ async def emit_event(
         actor_user_id=actor_user_id,
         subject_type=subject_type,
         subject_id=subject_id,
-        event_metadata=dict(metadata or {}),
+        event_metadata=redact_dict(dict(metadata or {})),
         message=message,
     )
     db.add(event)

@@ -1,10 +1,21 @@
 # tests/unit/actions/test_approval.py
-import uuid
+from collections.abc import AsyncGenerator
 
 import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import SessionLocal
 from app.services.actions import approval as approval_service
 from app.services.actions.approval import ApprovalError
+
+
+@pytest_asyncio.fixture
+async def db(two_tenants: dict) -> AsyncGenerator[AsyncSession]:
+    # Close the action session before two_tenants removes its records.
+    _ = two_tenants
+    async with SessionLocal() as session:
+        yield session
 
 
 @pytest.mark.asyncio
@@ -13,8 +24,9 @@ async def test_cannot_approve_own_action(db, two_tenants) -> None:
     Create a fake pending_approval record owned by user_a, then try to
     approve it as user_a.
     """
-    from app.db.models.action import ActionRecord
     from datetime import UTC, datetime
+
+    from app.db.models.action import ActionRecord
 
     record = ActionRecord(
         tenant_id=two_tenants["tenant_a"],
@@ -38,8 +50,9 @@ async def test_cannot_approve_own_action(db, two_tenants) -> None:
 
 @pytest.mark.asyncio
 async def test_cannot_approve_non_pending(db, two_tenants) -> None:
-    from app.db.models.action import ActionRecord
     from datetime import UTC, datetime
+
+    from app.db.models.action import ActionRecord
 
     record = ActionRecord(
         tenant_id=two_tenants["tenant_a"],
@@ -63,8 +76,9 @@ async def test_cannot_approve_non_pending(db, two_tenants) -> None:
 
 @pytest.mark.asyncio
 async def test_reject_sets_reason(db, two_tenants) -> None:
-    from app.db.models.action import ActionRecord
     from datetime import UTC, datetime
+
+    from app.db.models.action import ActionRecord
 
     record = ActionRecord(
         tenant_id=two_tenants["tenant_a"],

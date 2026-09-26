@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.security.redaction import redact_dict
 
 from app.db.models.action import ActionRecord
 from app.db.models.user import User
@@ -86,7 +87,7 @@ async def _handle_one(
         user_id=context.user_id,
         decision_run_id=context.decision_run_id,
         tool_name=call.name,
-        arguments=dict(call.arguments),
+        arguments=redact_dict(dict(call.arguments)),
         rationale=call.rationale,
         status="rejected",     # optimistic default; overwritten below
         proposed_at=proposed_at,
