@@ -154,6 +154,21 @@ async def upload_dataset(
     )
     await storage.put(key=storage_key, content=content)
 
+    # Record a file observation. This is the "memory" of the file even
+    # after the ingestion pipeline finishes and possibly deletes the bytes.
+    from app.services.ingestion.service import hash_bytes
+    from app.services.timestamps.files import observe_file
+
+    await observe_file(
+        db,
+        tenant_id=tenant_id,
+        source_id=source.id,
+        path=file.filename or storage_key,
+        content_hash=hash_bytes(content),
+        byte_size=len(content),
+        storage_key=storage_key,
+    )
+
     source.config = {
         **source.config,
         "storage_key": storage_key,

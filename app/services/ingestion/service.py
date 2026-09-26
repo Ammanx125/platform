@@ -192,6 +192,12 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         from app.services.understanding.service import compute_profile
         await compute_profile(db, job_id=job.id)
 
+        # Record ingestion timestamps for every staged row. Idempotent.
+        from app.services.timestamps.service import (
+            record_ingestion_timestamps_for_job,
+        )
+        await record_ingestion_timestamps_for_job(db, job_id=job.id)
+
         job.status = "succeeded"
         job.finished_at = datetime.now(UTC)
         await db.commit()

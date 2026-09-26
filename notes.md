@@ -91,3 +91,12 @@ row_limit=100_000 on load. This is the load-time safety cap. Aggregating more th
 group_by requires confirmed mappings for all grouping concepts. Rows whose source lacks a grouping mapping are skipped rather than put into a "no group" bucket. This keeps the group keys clean.
 
 _to_float strips currency symbols and thousands separators. Deliberately permissive. If the value can't be coerced, skipped++.
+
+RowTimestamp unique on (staged_row_id, kind). A row has at most one timestamp per kind. If a source provides multiple candidate dates, the connector picks the most semantically appropriate one for content.
+
+kind is String(20), not a Postgres enum. Adding a fifth kind later is a code change, no migration. Validated in code via TimeBasis.
+
+FileObservation unique on (tenant_id, source_id, path, content_hash). Modified file → new content_hash → new row. Preserves history. Same file, same content, seen again → last_seen_at bumped, status="unchanged".
+
+The composite indexes are the ones that will actually get used by detectors and the UI.
+
