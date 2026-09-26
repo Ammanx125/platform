@@ -13,6 +13,7 @@ from app.db.models.dataset import (
     StagedRow,
 )
 from app.db.models.decision import DecisionRun
+from app.db.models.event import Event
 from app.db.models.knowledge import Chunk, Document
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.role import Permission, Role, role_permissions, user_roles
@@ -30,7 +31,6 @@ from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 from app.db.models.webhook import WebhookDelivery
 from app.db.models.workflow import WorkflowInstance
-from app.db.models.event import Event
 
 __all__ = [
     "Tenant",

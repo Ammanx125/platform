@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.action import ActionRecord
 from app.db.models.workflow import WorkflowInstance
-from app.services.workflows.engine import resume_instance, run_instance
 from app.services.workflows.base import WorkflowContext
+from app.services.workflows.engine import resume_instance, run_instance
 
 
 async def run_pending_workflows_once(db: AsyncSession) -> int:

@@ -16,7 +16,6 @@ from app.workers.tasks.workflows import (
     run_waiting_workflows_once,
 )
 
-
 TASKS: list[Task] = [
     Task("ingestion", 2.0, run_ingestion_once),
     Task("webhooks", 2.0, run_webhooks_once),

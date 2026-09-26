@@ -49,7 +49,7 @@ async def dispatch_once(db: AsyncSession, *, batch: int = 10) -> int:
         for trigger in matched:
             if not _cooldown_elapsed(trigger, now):
                 continue
-            user_id = getattr(event, "user_id", None)
+            user_id = event.user_id
             if user_id is None:
                 event.error = "event has no user_id; workflow trigger skipped"
                 continue

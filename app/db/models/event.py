@@ -68,6 +68,13 @@ class Event(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         index=True,
     )
 
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )

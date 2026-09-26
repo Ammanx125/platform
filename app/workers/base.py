@@ -16,9 +16,8 @@ handled. In practice, this is achieved by the task claiming work with
 """
 from __future__ import annotations
 
-import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

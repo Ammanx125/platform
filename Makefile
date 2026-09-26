@@ -1,4 +1,11 @@
-.PHONY: db-up db-down db-reset migrate revision downgrade dev
+.PHONY: worker worker-once
+
+worker:
+	python -m app.workers.main
+
+# keep the old target for backwards compat if you like
+worker-legacy:
+	python -m app.workers.jobs
 
 db-up:
 	docker compose -f docker-compose.dev.yml up -d

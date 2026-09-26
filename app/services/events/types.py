@@ -10,7 +10,6 @@ emits is small and controlled.
 """
 from __future__ import annotations
 
-
 WEBHOOK_RECEIVED = "webhook.received"
 FILE_OBSERVED = "file.observed"
 INGESTION_COMPLETED = "ingestion.completed"

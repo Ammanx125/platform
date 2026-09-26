@@ -33,6 +33,7 @@ async def record_event(
     event_type: str,
     payload: dict[str, Any] | None = None,
     source_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     occurred_at: datetime | None = None,
     dedup_key: str | None = None,
 ) -> tuple[Event, bool]:
@@ -59,6 +60,7 @@ async def record_event(
         tenant_id=tenant_id,
         event_type=event_type,
         source_id=source_id,
+        user_id=user_id,
         occurred_at=occurred_at or now,
         received_at=now,
         dedup_key=dedup_key,
