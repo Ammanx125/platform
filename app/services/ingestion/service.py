@@ -198,6 +198,19 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         )
         await record_ingestion_timestamps_for_job(db, job_id=job.id)
 
+        # Run anomaly detectors. Failures here must not fail the job.
+        try:
+            from app.services.analytics.anomalies import run_all_detectors
+
+            await run_all_detectors(
+                db,
+                tenant_id=job.tenant_id,
+                source_ids=[source.id],
+            )
+        except Exception:  # noqa: BLE001
+            # Detection is opportunistic; never fail ingestion because of it.
+            pass
+
         job.status = "succeeded"
         job.finished_at = datetime.now(UTC)
         await db.commit()

@@ -100,3 +100,7 @@ FileObservation unique on (tenant_id, source_id, path, content_hash). Modified f
 
 The composite indexes are the ones that will actually get used by detectors and the UI.
 
+Irregular series are refused seasonality. ACF assumes regular spacing; on irregular data it produces noise.
+
+max_period scales with series length (n * 0.33), because you can't detect a period longer than the series can contain.
+

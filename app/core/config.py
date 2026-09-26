@@ -91,5 +91,17 @@ class Settings(BaseSettings):
     chunk_strategy: str = "continuity"
     chunk_heading_prefix: bool = True
 
+    # Forecasting
+    forecast_default_horizon: int = 14
+    forecast_min_points: int = 10
+    forecast_evaluation_metric: str = "mae"       # "mae" | "rmse" | "mape"
+    forecast_moving_average_window: int = 7
+    forecast_seasonality_min_period: int = 2
+    forecast_seasonality_max_fraction: float = 0.33
+    forecast_acf_peak_threshold: float = 0.3
+    forecast_reliability_high_max_rel_error: float = 0.05
+    forecast_reliability_medium_max_rel_error: float = 0.15
 
-settings = Settings()
+
+# BaseSettings loads required values from the environment at runtime.
+settings = Settings()  # pyright: ignore[reportCallIssue]
