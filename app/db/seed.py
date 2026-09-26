@@ -21,6 +21,7 @@ CANONICAL_PERMISSIONS: dict[str, str] = {
     "workflow:manage":  "Create and edit workflows",
     "audit:read":       "View the audit trail",
     "knowledge:write":  "Create, edit, and delete knowledge documents",
+    "tool_policy:manage": "Manage per-tenant tool approval policies",
 }
 
 
@@ -34,6 +35,7 @@ CANONICAL_ROLES: dict[str, dict] = {
         "permissions": [
             "dataset:read", "knowledge:read", "decision:run",
             "action:propose", "action:approve", "action:reject",
+            "tool_policy:manage",
             "workflow:manage", "audit:read", "user:manage",
         ],
     },

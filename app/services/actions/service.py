@@ -22,17 +22,12 @@ from datetime import UTC, datetime
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.security.redaction import redact_dict
 
 from app.db.models.action import ActionRecord
 from app.db.models.user import User
+from app.services.actions import policy as policy_service
 from app.services.actions.audit import emit_event
 from app.services.actions.base import (
-    RISK_CONFIGURABLE,
-    RISK_ELEVATED,
-    RISK_READ,
-    RISK_REPORT,
-    RISK_REQUIRED,
     ActionContext,
     ActionError,
     VerificationOutcome,
@@ -40,20 +35,7 @@ from app.services.actions.base import (
 from app.services.actions.registry import get as get_action
 from app.services.actions.validators import run_validators
 from app.services.llm.schemas import ToolCall
-
-# Risk levels that execute immediately without human approval.
-_AUTO_EXECUTE_LEVELS = {RISK_READ, RISK_REPORT, RISK_CONFIGURABLE}
-
-
-def _requires_approval(risk_level: str) -> bool:
-    """
-    In 11b, approval is required for levels in {required, elevated}.
-
-    configurable is treated as auto-execute for now — a tenant-specific
-    override table (TenantToolPolicy) will change this on a per-tenant basis
-    in a future step.
-    """
-    return risk_level in {RISK_REQUIRED, RISK_ELEVATED}
+from app.services.security.redaction import redact_dict
 
 
 async def handle_proposals(
@@ -165,11 +147,26 @@ async def _handle_one(
         await _audit_rejected(db, record=record, context=context)
         return record
 
-    # 5. Risk policy: auto-execute or queue for approval.
-    if _requires_approval(action.risk_level):
+    # 5. Resolve effective policy.
+    effective = await policy_service.resolve(
+        db,
+        tenant_id=context.tenant_id,
+        tool_name=action.name,
+        tool_risk_level=action.risk_level,
+    )
+    validation_result["effective_policy"] = effective
+    record.validation_result = validation_result
+
+    if effective == policy_service.POLICY_DISABLED:
+        record.status = "rejected"
+        record.rejection_reason = (
+            f"tool {action.name!r} is disabled for this tenant"
+        )
+        await _audit_rejected(db, record=record, context=context)
+        return record
+
+    if effective == policy_service.POLICY_REQUIRE_APPROVAL:
         record.status = "pending_approval"
-        validation_result["requires_approval"] = True
-        record.validation_result = validation_result
         await db.flush()
         await emit_event(
             db,
@@ -181,6 +178,7 @@ async def _handle_one(
             metadata={
                 "tool_name": record.tool_name,
                 "risk_level": action.risk_level,
+                "effective_policy": effective,
             },
             message=f"{action.name} queued for approval",
         )
