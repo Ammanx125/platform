@@ -1,4 +1,5 @@
 # app/db/models/__init__.py
+from app.db.models.action import ActionRecord
 from app.db.models.analytics import (
     Anomaly,
     AnomalyDetectorDefinition,
@@ -10,6 +11,7 @@ from app.db.models.dataset import (
     IngestionLineage,
     StagedRow,
 )
+from app.db.models.decision import DecisionRun
 from app.db.models.knowledge import Chunk, Document
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.role import Permission, Role, role_permissions, user_roles
@@ -52,4 +54,6 @@ __all__ = [
     "Anomaly",
     "FileObservation",
     "RowTimestamp",
+    "DecisionRun",
+    "ActionRecord",
 ]

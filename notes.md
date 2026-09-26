@@ -1,113 +1,87 @@
-Notes on the design:
+# Engineering Notes
 
-'_infer_column_type' uses a 95% threshold. A column with 96% valid dates and 4% typos still infers as date. This is deliberate — real-world data is dirty and you don't want a single bad cell to poison the type. The quality module then flags the 4% as an issue.
+Design decisions, invariants, and known limits across the platform. These notes explain why the implementation behaves as it does and identify constraints that matter when extending it.
 
-Order of type checks matters. 'boolean' before 'integer' because True/False would otherwise pass '_try_int' if someone stored 1/0. integer before float so 42 isn't coerced to 42.0.
+## Data Profiling and Quality
 
-'_MAX_TRACKED_DISTINCT = 5000'. Beyond this we stop counting distinct values to bound memory. distinct_count = -1 signals "unknown, too many." The quality module handles the sentinel.
+- **Type inference tolerates dirty data.** `_infer_column_type` accepts a type when at least 95% of values match it. For example, 96% valid dates and 4% typos still infer as dates; the quality checks report the bad values separately.
+- **Type-check order is significant.** Check booleans before integers, then integers before floats. This avoids treating booleans as `1`/`0` and keeps whole numbers from being coerced to floats.
+- **Distinct-value tracking is bounded.** `_MAX_TRACKED_DISTINCT` is 5,000. Above that, tracking stops and `distinct_count = -1` means “unknown; limit exceeded.” Quality checks understand this sentinel.
+- **Duplicate-row detection is linear.** Rows are hashed from sorted key/value string tuples. This works with unhashable values and costs O(n), which is acceptable for the current profiling pass.
+- **Candidate keys are single-column only.** Composite-key discovery is intentionally excluded to avoid combinatorial work on wide tables; common identifiers such as IDs and SKUs are covered.
+- **Missingness severity defaults** to warning at 20% and error at 50%. These thresholds are heuristic and may become configurable later.
+- **Negative quantity checks use column names as a hint.** `impossible_quantity` flags negative values only when the column looks quantity-like. Names suggesting balances or deltas are excluded because negative values may be valid.
+- **Date quality checks are intentionally decoupled from inference.** `invalid_date` performs its own parse check instead of importing the profiler’s helper. Inference and quality have different responsibilities and may evolve independently.
+- **Identifier normalization differs by purpose.** `inconsistent_identifier` lowercases and collapses whitespace but preserves punctuation, so `ACME-1` and `ACME1` remain distinct. Concept matching removes non-alphanumeric characters, so `customer_name`, `Customer Name`, `customerName`, and `CUSTOMER-NAME` normalize to the same key.
+- **Duplicate-entity checks** target identifier-like columns (`id`, `*_id`, `sku`, `code`) that are not already candidate keys.
 
-Duplicate row detection hashes rows as sorted key-value string tuples. This is O(n) and works on unhashable values. Not free but acceptable for a first pass.
+## Concepts and Semantic Mapping
 
-No multi-column candidate keys. Combinatorial explosion on wide tables. Single-column keys catch the common case (an id or sku column).
+- **Canonical concepts are global.** `CanonicalConcept` has no `tenant_id`; `SemanticMapping` is tenant-owned through `TenantMixin`.
+- **Concept kind and value type are separate.** `kind` describes mapping cardinality (`attribute`, `entity`, `fact`); `value_type` describes data (`string`, `number`, `date`, `boolean`, `entity`). For example, an invoice number can be a `fact` with a `string` value type.
+- **The base catalog has 31 domain concepts and four generic attributes** (`date`, `amount`, `quantity`, `name`) as mapping targets, for 35 entries total.
+- **Synonyms are stored lowercase without punctuation.** Column names are normalized before matching. `rapidfuzz.fuzz.ratio` returns 0–100; `_STRONG = 90` and `_WEAK = 75` are starting heuristics to tune against real data.
+- **One source column maps to one concept.** The unique constraint is `(source_id, source_column)`. If a column already has a mapping, `create_mapping` returns 409; update it with PATCH rather than creating a second mapping.
+- **The best-scoring concept wins, but never auto-confirms.** A column such as `unit_price` may match multiple concepts, so human confirmation is required even for exact or high-confidence matches. Matcher proposals remain `proposed`; hand-created mappings are `confirmed`.
+- **Mapping rationale is an audit trail.** JSONB `rationale` records how a concept was selected, such as `{"method": "exact_synonym", "matched_synonym": "supplier", "score": 1.0}`.
+- **Proposal generation is idempotent in effect.** Columns with an existing mapping in any status are skipped, so confirmed mappings are not proposed again.
+- **Matchers are injectable.** Tests can use `FakeMatcher`; production currently uses `DeterministicMatcher`. An `LLMMatcher` can be registered and selected through configuration later.
+- **Seeding is additive.** `seed_canonical_concepts` never deletes concepts removed from the seed file, because existing mappings may depend on them. Deletion is a deliberate manual or administrative operation.
+- **Mapping proposal route:** `POST /datasets/{id}/mappings/propose?job_id=...`. The job ID is a query parameter because proposals use a job profile while the route is dataset-oriented.
+- **Packs reference existing concepts instead of redefining them.** For example, `procurement.v1` references catalog concepts such as `Procurement.Supplier` and defines only new concepts such as `Procurement.RFQ` inline. Installation resolves both forms.
 
-high_missingness has two severity tiers: 20% warning, 50% error. This is arbitrary but a useful default. Configurable later.
+## Secrets and Encryption
 
-impossible_quantity is heuristic on the column name. It only fires if the value is actually negative and the column looks quantity-like. It doesn't fire on balance or delta columns even if negative — those are legitimately negative.
+- **Fernet protects stored secrets** with authenticated encryption (AES-128-CBC plus HMAC-SHA256); tampering is detected and rejected.
+- **Development key fallback derives from `JWT_SECRET`.** This avoids another local environment variable. Rotating the JWT secret makes existing fallback-encrypted webhook secrets unreadable, which is acceptable in development.
+- **Production refuses the fallback.** Production must use a dedicated encryption key so JWT rotation does not silently invalidate stored secrets.
+- **`DecryptionError` is distinct** so callers can distinguish ciphertext that fails authentication/decryption from data that was never encrypted.
 
-invalid_date re-implements the date-parse check rather than importing from the profiler. Duplication is deliberate: the profiler's inference and the quality check have different jobs and might diverge (e.g. the profiler gets stricter over time, the quality check stays looser). Cross-module function imports would couple them.
+## Retrieval and Document Processing
 
-inconsistent_identifier compares values that normalize to the same key. Uses _norm_key (lowercase + collapse whitespace). It does not strip punctuation — ACME-1 and ACME1 stay distinct on purpose.
+- **Embedding dimensions are a schema constraint.** Changing `embedding_dimensions` after migration requires a new migration (for example, `ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(N)`) and invalidates existing embeddings, which must be regenerated.
+- **Retrieval uses per-result-set min-max normalization.** For example, raw vector scores `[0.9, 0.85, 0.7]` become `[1.0, 0.75, 0.0]`. The weakest item maps to zero even if its raw score was strong; this is predictable but aggressive.
+- **Candidate retrieval uses a 3x multiplier.** To return 10 results, fetch 30 from each retriever before merging. This reduces the chance that the final list is dominated by one retrieval strategy.
+- **Duplicate chunks are merged.** A chunk found by vector and keyword retrieval appears once, with both contributions represented in `score_components`.
+- **Retrieval weights come from configuration** so they can be tuned without redeployment.
+- **`Block` is immutable.** The chunker treats blocks as frozen input and assembles new `TextChunk` objects rather than mutating them.
+- **Structural breaks guide strict chunking.** `is_structural_break()` controls where chunks may end: list items can join adjacent list items, while a heading cannot merge with the paragraph before it.
+- **Whitespace normalization preserves line boundaries.** `_normalize_line_whitespace` collapses runs within a line without flattening intentional line breaks such as addresses or poetry.
+- **Sentence splitting is intentionally approximate.** The current regex handles common cases; a full sentence splitter such as NLTK or spaCy remains a possible future improvement.
+- **A generic `db: Any` type is a deliberate dependency tradeoff** in otherwise pure-data code. Use a `TYPE_CHECKING` import and an `"AsyncSession"` annotation if stronger typing is needed without a runtime SQLAlchemy import.
 
-duplicate_entity fires when a column looks like an id (id, *_id, sku, code) but isn't in candidate_keys.
+## Ingestion, Timestamps, and Files
 
-CanonicalConcept has no tenant_id — it's a global catalog, per our earlier decision.
+- **`__source_id` is added to every row dictionary** as a private key. A real input column with that exact name would collide; the current naming convention is preferred over a tuple-based representation.
+- **Series loading is capped at 100,000 rows.** Larger Python-side aggregation may become slow; tenants exceeding the cap should move to SQL-side aggregation.
+- **Grouped series require confirmed mappings.** Rows whose source lacks a confirmed mapping for a grouping concept are skipped rather than placed in an ungrouped bucket. Values that cannot be converted by `_to_float` (which strips currency symbols and thousands separators) are skipped.
+- **A `RowTimestamp` is unique per `(staged_row_id, kind)`.** Connectors select the most semantically appropriate candidate date for each kind. `kind` is `String(20)`, not a PostgreSQL enum; `TimeBasis` validates allowed values in code.
+- **File observations preserve content history.** The unique key is `(tenant_id, source_id, path, content_hash)`. Modified content creates a new observation; seeing unchanged content again updates `last_seen_at` and sets status to `unchanged`.
+- **Composite indexes are chosen for detector and UI access patterns.**
 
-SemanticMapping uses TenantMixin — mappings belong to a tenant.
+## Analytics and Forecasting
 
-The unique constraint is (source_id, source_column), not (source_id, source_column, canonical_concept_key). A single source column maps to one concept. If you want to allow multiple concepts per column (e.g. order_date → both Purchase.date and Shipment.date), tell me now — it's a schema change.
+- **Irregular series do not use seasonality detection.** Autocorrelation assumes regular spacing and produces noise on irregular data.
+- **The maximum candidate period scales with series length** (`n * 0.33`) because a series cannot reliably reveal a period longer than the observations support.
+- **Forecast requests require explicit specifications.** There is no reliable heuristic for deciding which series a user intends to forecast. If the planner cannot supply the required specs, the capability refuses; the LLM router may supply them when used.
+- **Anomaly and forecast series building remains bounded and mapping-driven.** See the ingestion notes for row caps, confirmed grouping mappings, and timestamp basis selection.
 
-rationale JSONB — records why the matcher chose this concept. Example: {"method": "exact_synonym", "matched_synonym": "supplier", "score": 1.0}. This is the Step 5 "lineage" requirement. Without it, human reviewers can't tell whether a fuzzy match was reasonable.
+## LLM and Orchestration Boundaries
 
-31 domain concepts + 4 generic attributes = 35 rows. The 31 is your table; the 4 generics are the ones that would otherwise be unmappable (date, amount, quantity, name) — they're not in your 31 because they're too generic to be a business domain concept, but they're needed as mapping targets.
+- **LLM responses are injectable.** Tests can use `MockLLMProvider(response=LLMResponse(...))`.
+- **The mock provider is deterministic.** It accepts `system`, `messages`, and `tools` to satisfy the provider protocol, but ignores them and returns the injected response (including `raw`, which may be `None`).
+- **System and messages have distinct trust levels.** `system` contains application-controlled identity, policy, safety, and output requirements. `messages` contain runtime content such as user requests, retrieved facts, documents, and prior turns. Tenant-controlled or retrieved content is data, never system instruction. Python does not enforce this against every caller, so call sites require review and tests.
+- **Provider validation is structural; orchestration validation is semantic.** Provider adapters parse and validate the canonical `LLMResponse` shape, including tool-call structure. The orchestrator validates tool existence, authorization, argument meaning, tenant constraints, business rules, and approval requirements before execution. Provider adapters must not own the tool registry or business policy.
+- **Capabilities do not call each other.** Retrieval and KPI are independent; the executor runs them sequentially and assembles their results.
+- **`_infer_kpi_keys` and `_infer_detector_keys` are lightweight name-overlap heuristics.** They cover common queries; the LLM router handles more complex routing.
 
-kind and value_type are separate. kind is about mapping cardinality (attribute, entity, fact); value_type is about the data type (string, number, date, boolean, entity). An entity concept has kind=entity and value_type=entity. A Finance.Invoice has kind=fact and value_type=string (the invoice number is a string).
+Validator = Any — typing validators strictly requires a Callable Protocol that Pydantic models can't easily satisfy across tools. Any is honest; the runtime check in the registry verifies the shape.
 
-Synonyms are lowercase, no punctuation. The matcher normalizes column names the same way before comparing.
+parameters_model is required — because the schema for the LLM comes from it. If a tool wants to provide a raw schema instead, that's what c: both was for; I'm not supporting it in 11a because nothing needs it yet. Add when a real case arrives.
 
-seed_canonical_concepts never deletes. If you remove a concept from the file, it stays in the DB. This is deliberate — mappings referencing it would otherwise break. Deletion is a manual operation, done via SQL or a future admin endpoint.
+execute(db, payload, context) — db is the session; payload is a validated instance of parameters_model; context carries identity. Tools that need tenant data query through db, scoped to context.tenant_id.
 
-Normalization strips everything non-alphanumeric. customer_name, Customer Name, customerName, and CUSTOMER-NAME all become customername. This is how the matcher handles the varied naming customers actually use.
+run_validators catches exceptions. A malformed validator doesn't crash the whole pipeline; it becomes a failed check with the exception text.
 
-rapidfuzz.fuzz.ratio returns 0–100. _STRONG = 90 and _WEAK = 75 are heuristics; tune later based on real customer data.
+Stops at first failure. Matches the standard policy pipeline. If you'd rather collect all failures (some auditors prefer this), change break to continue. I'd keep the short-circuit — later checks may be meaningless if earlier ones fail.
 
-A column maps to at most one concept. The highest-scoring one wins. Real datasets sometimes have unit_price that could be SellingPrice or PurchasePrice — the matcher will pick whichever concept's synonyms are closer. This is exactly why human confirmation exists.
-
-rationale records the matched candidate and score. This is the audit trail.
-
-Re-running propose_mappings is idempotent in effect: columns already mapped (in any status) are skipped. This means a human who confirmed a mapping won't see it re-proposed as proposed.
-
-No auto-confirmation, ever. Even exact matches are status="proposed" and need a human to confirm. This is deliberate — see blueprint section 11: "Human confirmation: uncertain mappings become review items." Even high-confidence matches become review items because the cost of a wrong auto-confirmed mapping is a silently wrong decision downstream.
-
-The matcher is injectable. Tests pass a FakeMatcher. Production passes DeterministicMatcher() (which is the default). Step 9 will register LLMMatcher and pick based on config.
-
-The propose endpoint is POST /datasets/{id}/mappings/propose?job_id=... — the job_id is a query param because the endpoint operates on a job's profile but lives under a dataset route. Slightly awkward; an alternative is POST /jobs/{job_id}/mappings/propose. If you prefer the latter, say so and I'll restructure. I chose this because the natural reading is "give me mappings for this dataset."
-
-create_mapping sets status="confirmed" directly. A human who types a mapping by hand is confirming it. This is different from matcher proposals, which start as proposed.
-
-The unique constraint (source_id, source_column) means create_mapping returns 409 if the column already has a mapping. The right move is PATCH. This is a bit strict — some teams prefer upsert. Tell me if you want upsert semantics instead.
-
-Fernet is authenticated encryption (AES-128-CBC + HMAC-SHA256). Tampering is detected and rejected. This is the right primitive for secrets.
-
-Dev fallback derives from JWT_SECRET. Two consequences: (1) you don't need a new env var for local dev, (2) if you rotate JWT_SECRET, previously-encrypted webhook secrets become undecryptable — which is fine in dev, and would be a big deal in prod, which is why prod refuses the fallback.
-
-DecryptionError is its own type so callers can distinguish "encrypted but bad key" from "not encrypted at all."
-
-changing embedding_dimensions after the migration is applied requires a new migration (ALTER TABLE chunks ALTER COLUMN embedding TYPE vector(N)), and it invalidates all existing embeddings.
-
-Note: db: Any is a pragmatic choice. Typing it AsyncSession would import SQLAlchemy into a module that's otherwise pure-data. If you'd rather have the real type, change Any to "AsyncSession" with a TYPE_CHECKING import.
-
-Min-max normalization per result set. If vector gives scores [0.9, 0.85, 0.7], they normalize to [1.0, 0.75, 0.0]. The worst item gets 0, even if its raw score was 0.7. That's aggressive but predictable. A softer alternative is z-score normalization; min-max is the standard first choice.
-
-3× candidate multiplier. If you want 10 results, fetch 30 from each retriever. Common IR heuristic; ensures merged top-10 isn't dominated by one strategy.
-
-Duplicate items (a chunk retrieved by both vector and keyword) get merged into one item whose score_components shows both contributions. That's exactly what the field is for.
-
-Weights from config. Tune without redeploying.
-
-Block is frozen. Immutable input to the chunker. The chunker never mutates blocks; it assembles new TextChunks.
-
-is_structural_break() is used by the strict chunker strategy to decide where a chunk can end. A list_item can merge with the next list_item; a heading cannot merge with the previous paragraph.
-
-_normalize_line_whitespace collapses intra-line runs but keeps line boundaries. This matters because a paragraph with intentional line breaks (poetry, address blocks) shouldn't be flattened.
-
-split_into_sentences is approximate on purpose. The comment says so. Replacing it with a real sentence splitter (nltk, spacy) is a future improvement; the current regex covers the common case.
-
-One important design point: the concepts list for procurement.v1 mostly references existing catalog entries ({"key": "Procurement.Supplier"}). Only Procurement.RFQ is defined inline because it's new. This is deliberate: a pack doesn't redefine a concept that's already in the base catalog; it just declares "these concepts are part of me" so installation knows what to link in. The install_pack function (next section) handles both cases.
-
-__source_id is injected into every row dict. It's a private key that shouldn't collide with real data. If a customer's CSV literally has a column named __source_id, this breaks — but that's sufficiently unlikely, and the fix (using a tuple) is uglier than the naming convention.
-
-row_limit=100_000 on load. This is the load-time safety cap. Aggregating more than that in Python becomes slow; if a tenant hits it, the right answer is SQL-side aggregation (a future step). For now, cap and note it.
-
-group_by requires confirmed mappings for all grouping concepts. Rows whose source lacks a grouping mapping are skipped rather than put into a "no group" bucket. This keeps the group keys clean.
-
-_to_float strips currency symbols and thousands separators. Deliberately permissive. If the value can't be coerced, skipped++.
-
-RowTimestamp unique on (staged_row_id, kind). A row has at most one timestamp per kind. If a source provides multiple candidate dates, the connector picks the most semantically appropriate one for content.
-
-kind is String(20), not a Postgres enum. Adding a fifth kind later is a code change, no migration. Validated in code via TimeBasis.
-
-FileObservation unique on (tenant_id, source_id, path, content_hash). Modified file → new content_hash → new row. Preserves history. Same file, same content, seen again → last_seen_at bumped, status="unchanged".
-
-The composite indexes are the ones that will actually get used by detectors and the UI.
-
-Irregular series are refused seasonality. ACF assumes regular spacing; on irregular data it produces noise.
-
-max_period scales with series length (n * 0.33), because you can't detect a period longer than the series can contain.
-
-response is injectable. Tests use MockLLMProvider(response=LLMResponse(...)).
-
-system, messages, tools are accepted but ignored. The signature has to match the Protocol; the mock doesn't care about the values. That's the point.
-
-The default is deterministic. Same output every call, every time, regardless of input.
-
-No copying of raw — it's whatever the injector set, including None.
