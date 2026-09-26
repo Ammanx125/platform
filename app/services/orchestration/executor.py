@@ -36,7 +36,6 @@ from app.services.orchestration.context import (
 from app.services.orchestration.planner import plan as build_plan
 from app.services.orchestration.policies import validate_claims
 from app.services.security.prompt_safety import wrap_untrusted
-
 from app.services.security.redaction import redact_dict
 
 # Caps on evidence size, applied after each capability runs. The LLM has a
@@ -47,8 +46,8 @@ _EVIDENCE_CAPS = {
     "kpi": 100,
     "anomaly": 20,
     "forecast": 100,
+    "workflow": 5,
 }
-
 
 def _cap(items: list, kind: str) -> list:
     cap = _EVIDENCE_CAPS.get(kind, 20)
@@ -96,6 +95,10 @@ def _render_prompt(request: OrchestratorRequest, evidence: Evidence) -> str:
     if evidence.forecasts:
         lines.append("Forecasts:")
         for item in evidence.forecasts:
+            lines.append(f"- [{item.id}] {item.text}")
+    if evidence.workflows:
+        lines.append("Workflows:")
+        for item in evidence.workflows:
             lines.append(f"- [{item.id}] {item.text}")
     if evidence.capability_errors:
         lines.append("Capability errors:")
@@ -158,8 +161,11 @@ async def execute(
     # 2. Run capabilities.
     all_items: dict[str, list] = {
         "chunk": [], "row": [], "kpi": [], "anomaly": [], "forecast": [],
+        "workflow": [],
     }
     for step in result.plan.steps:
+        if step.capability == "workflow" and "user_id" not in step.parameters:
+            step.parameters["user_id"] = str(user_id)
         try:
             capability = get_capability(step.capability)
         except CapabilityError as exc:
@@ -198,6 +204,7 @@ async def execute(
     result.evidence.kpis = _cap(all_items["kpi"], "kpi")
     result.evidence.anomalies = _cap(all_items["anomaly"], "anomaly")
     result.evidence.forecasts = _cap(all_items["forecast"], "forecast")
+    result.evidence.workflows = _cap(all_items["workflow"], "workflow")
 
     # 3b. Scan retrieved content for injection signals.
     from app.services.security.prompt_safety import scan
@@ -276,7 +283,7 @@ async def persist(
     row = DecisionRun(
         tenant_id=result.tenant_id,
         user_id=result.user_id,
-        query=redact(result.query) if False else result.query,
+        query=result.query,
         source_ids=[str(s) for s in result.source_ids],
         intent=result.plan.intent,
         plan=[

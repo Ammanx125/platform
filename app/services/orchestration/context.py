@@ -89,10 +89,14 @@ class Evidence:
     kpis: list[EvidenceItem] = field(default_factory=list)
     anomalies: list[EvidenceItem] = field(default_factory=list)
     forecasts: list[EvidenceItem] = field(default_factory=list)
+    workflows: list[EvidenceItem] = field(default_factory=list)
     capability_errors: list[dict[str, Any]] = field(default_factory=list)
 
     def all_items(self) -> list[EvidenceItem]:
-        return [*self.chunks, *self.kpis, *self.anomalies, *self.forecasts]
+        return [
+            *self.chunks, *self.kpis,
+            *self.anomalies, *self.forecasts, *self.workflows,
+        ]
 
     def to_dict(self) -> dict[str, Any]:
         def _wrap(item: EvidenceItem) -> dict[str, Any]:
@@ -105,9 +109,9 @@ class Evidence:
             "kpis": [_wrap(i) for i in self.kpis],
             "anomalies": [_wrap(i) for i in self.anomalies],
             "forecasts": [_wrap(i) for i in self.forecasts],
+            "workflows": [_wrap(i) for i in self.workflows],
             "capability_errors": self.capability_errors,
         }
-
 
 @dataclass
 class ValidatedClaim:

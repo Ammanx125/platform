@@ -331,3 +331,108 @@ def get_capability(name: str) -> Capability:
         return CAPABILITIES[name]
     except KeyError as exc:
         raise CapabilityError(f"unknown capability: {name!r}") from exc
+
+# ---------- workflow ----------
+
+class WorkflowCapability:
+    """
+    Invokes a named workflow and returns evidence describing the instance's
+    current state.
+
+    The workflow runs to its first pause point (or completion). If it
+    completes synchronously, the evidence includes all step outputs. If it
+    pauses (waiting on an approval), the evidence says so and includes the
+    paused step's output; the decision the workflow is attached to can
+    resume later.
+
+    Called by the orchestrator when the planner selects a workflow. The
+    planner's rules tier picks workflows by trigger keywords; the LLM tier
+    can request one explicitly via step_params.workflow_key.
+    """
+    name = "workflow"
+
+    async def run(
+        self,
+        *,
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        step_params: dict[str, Any],
+        query: str,
+        source_ids: list[uuid.UUID] | None,
+    ) -> list[EvidenceItem]:
+        from app.services.workflows.engine import WorkflowError, start_workflow
+
+        workflow_key = step_params.get("workflow_key")
+        if not workflow_key:
+            raise CapabilityError(
+                "workflow capability requires 'workflow_key' in step_params"
+            )
+
+        user_id = step_params.get("user_id")
+        if user_id is None:
+            raise CapabilityError(
+                "workflow capability requires 'user_id' in step_params"
+            )
+
+        # decision_run_id may be forwarded when the orchestrator knows it.
+        # In Step 16 the decision row doesn't exist yet at this point, so
+        # it's None; Step 17+ will thread it through.
+        try:
+            instance = await start_workflow(
+                db,
+                workflow_key=workflow_key,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                source_ids=list(source_ids or []),
+                trigger_type="decision",
+                trigger_metadata={"query": query},
+                decision_run_id=None,
+                run_now=True,
+            )
+        except WorkflowError as exc:
+            raise CapabilityError(str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise CapabilityError(f"workflow {workflow_key!r} failed: {exc}") from exc
+
+        return [_workflow_instance_to_evidence(instance)]
+
+
+def _workflow_instance_to_evidence(instance: Any) -> EvidenceItem:
+    """Render a WorkflowInstance as an EvidenceItem."""
+    step_summary = [
+        {
+            "name": s.get("name"),
+            "status": s.get("status"),
+            "output": s.get("output"),
+            "error": s.get("error"),
+        }
+        for s in instance.step_states
+    ]
+    return EvidenceItem(
+        kind="workflow",
+        id=f"workflow:{instance.id}",
+        text=(
+            f"Workflow {instance.workflow_key} status={instance.status}"
+            + (
+                f" (waiting: {instance.pending_approval_step})"
+                if instance.pending_approval_step else ""
+            )
+        ),
+        data={
+            "id": f"workflow:{instance.id}",
+            "workflow_key": instance.workflow_key,
+            "instance_id": str(instance.id),
+            "status": instance.status,
+            "current_step": instance.current_step,
+            "steps": step_summary,
+            "context": instance.workflow_context,
+            "pending_approval_step": instance.pending_approval_step,
+            "pending_action_id": (
+                str(instance.pending_action_id)
+                if instance.pending_action_id else None
+            ),
+        },
+    )
+
+
+CAPABILITIES["workflow"] = WorkflowCapability()

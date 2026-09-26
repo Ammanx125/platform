@@ -23,7 +23,6 @@ from app.services.actions.base import (
     RISK_REQUIRED,
 )
 
-
 # Effective policy values returned by resolve().
 POLICY_AUTO = "auto"
 POLICY_REQUIRE_APPROVAL = "require_approval"

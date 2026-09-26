@@ -35,6 +35,7 @@ REDACTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         (api[_-]?key|apikey|secret|password|passwd|token|auth)
         \s*[:=]\s*
         ["']?
+        (?!\[REDACTED\b)
         ([^\s"',}\]]+)
         """
      ),
@@ -79,7 +80,7 @@ INJECTION_PATTERNS: list[tuple[re.Pattern[str], float, str]] = [
     # System-prompt extraction.
     (re.compile(
         r"(?i)\b(reveal|show|print|output|repeat|disclose)\s+"
-        r"(?:your\s+)?(?:system\s+)?"
+        r"(?:(?:your|the)\s+)?(?:system\s+)?"
         r"(?:prompt|instructions?|rules?|guidelines?)"
      ), 0.6, "prompt_extraction"),
 
@@ -92,7 +93,8 @@ INJECTION_PATTERNS: list[tuple[re.Pattern[str], float, str]] = [
 
     # Role tags at line start (chat-template confusion).
     (re.compile(
-        r"(?m)^\s*(?:system|assistant|developer)\s*[:>]",
+        r"(?m)(?:^\s*|<\|im_start\|>\s*)"
+        r"(?:system|assistant|developer)\s*[:>]",
         re.IGNORECASE,
      ), 0.4, "role_tag"),
 

@@ -12,9 +12,9 @@ import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.security.redaction import redact_dict
 
 from app.db.models.audit import AuditEvent
+from app.services.security.redaction import redact_dict
 
 
 async def emit_event(

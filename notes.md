@@ -90,3 +90,17 @@ _run_and_verify is shared between the auto-execute path and the approved path. S
 Audit events are emitted at every transition: proposed→pending, proposed→rejected, proposed→executed, approved→executed, approved→verification_failed, approved→failed.
 
 verification_failed is a distinct status. It says: "we ran it, we can't confirm it happened." That's different from failed (we know it didn't run).
+
+run_instance is idempotent on resume. It skips steps whose state is already completed. When resume_instance marks the waiting step completed, running again from the top skips everything up to the next step.
+
+wait_for_approval=False default for run_action — per your decision G. The workflow only waits when it explicitly asks to.
+
+await_action supports two forms of action_id_from — a bag key whose value is a list of action ids (set by a prior run_action step), or a literal UUID string. The bag form is the common case.
+
+Multi-action waits are single-action today. A run_action step with three tool calls where two go to approval will wait only on the first. That's a documented limitation; making it wait on all of them is a change to the wait_ref model and can come later.
+
+Two things to note:
+
+EvidenceItem.kind = "workflow" — new kind. Update Evidence in context.py to add a workflows: list[EvidenceItem] field, and update all_items() and to_dict() accordingly. The _EVIDENCE_CAPS in executor.py needs a cap for workflow too (say, 5). And the prompt renderer should include a section for workflow evidence.
+
+step_params.user_id — the planner doesn't currently know the user id. So the executor needs to inject it when building plan steps, or the workflow capability needs to receive it another way. Simplest: the executor, before running capabilities, adds user_id to every step's parameters if not present. I'll show that change below.

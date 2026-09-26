@@ -9,10 +9,10 @@ from app.api.v1.decisions import router as decisions_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.mappings import router as mappings_router
 from app.api.v1.tenants import router as tenants_router
+from app.api.v1.tool_policies import router as tool_policies_router
 from app.api.v1.users import router as users_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.workflows import router as workflows_router
-from app.api.v1.tool_policies import router as tool_policies_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -29,3 +29,4 @@ api_router.include_router(analytics_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(workflows_router)
 api_router.include_router(tool_policies_router)
+api_router.include_router(workflows_router)

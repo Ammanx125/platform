@@ -23,6 +23,7 @@ from app.services.orchestration.context import (
     Plan,
     PlanStep,
 )
+from app.services.workflows.registry import match_by_query as match_workflows
 
 # Tokens that suggest a specific capability. Deliberately small; the LLM
 # router handles the rest.
@@ -99,6 +100,26 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
             parameters={},
         ))
 
+    # Domain workflows take precedence over generic capabilities when the
+    # query clearly belongs to a domain.
+    matched_workflows = match_workflows(request.query)
+    if matched_workflows:
+        # Pick the first (registry iteration is stable). A future ranking
+        # would prefer the workflow with the most trigger-keyword overlap.
+        wf_key = matched_workflows[0]
+        # Replace any generic steps with a single workflow step.
+        return Plan(
+            steps=[
+                PlanStep(
+                    capability="workflow",
+                    reason=f"query matched domain '{wf_key.split('.')[0]}'",
+                    parameters={"workflow_key": wf_key},
+                ),
+            ],
+            routing_method="rules",
+            intent={"workflow_key": wf_key, "tokens": sorted(toks)},
+        )
+
     if not steps:
         return None
 
@@ -115,6 +136,9 @@ _ROUTING_SYSTEM = (
     "  - kpi: evaluate named metrics (e.g. total spend, gross margin)\n"
     "  - anomaly: find anomalous points in time series\n"
     "  - forecast: project a series into the future\n"
+    "  - workflow: run a domain-specific multi-step process. If you "
+    "    choose this, set parameters.workflow_key to one of the "
+    "    registered workflows (the caller will provide the list).\n"
     "Respond with a JSON object of the form: "
     '{"steps": [{"capability": "...", "reason": "...", '
     '"parameters": {}}]}. '

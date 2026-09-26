@@ -25,10 +25,11 @@ from app.db.models.semantic import (
 )
 from app.db.models.tenant import Tenant
 from app.db.models.timestamps import FileObservation, RowTimestamp
+from app.db.models.tool_policy import TenantToolPolicy
 from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 from app.db.models.webhook import WebhookDelivery
-from app.db.models.tool_policy import TenantToolPolicy
+from app.db.models.workflow import WorkflowInstance
 
 __all__ = [
     "Tenant",
@@ -60,4 +61,5 @@ __all__ = [
     "ActionRecord",
     "AuditEvent",
     "TenantToolPolicy",
+    "WorkflowInstance",
 ]
