@@ -13,12 +13,14 @@ prevents a burst of events from spawning many workflow runs.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.event import Event
+from app.db.models.user import User
 from app.db.models.workflow import WorkflowTrigger
 from app.services.workflows.engine import WorkflowError, start_workflow
 
@@ -41,17 +43,43 @@ async def dispatch_once(db: AsyncSession, *, batch: int = 10) -> int:
 
     now = datetime.now(UTC)
     dispatched = 0
+    system_user_ids: dict[uuid.UUID, uuid.UUID | None] = {}
+
+    async def system_user_id_for(tenant_id: uuid.UUID) -> uuid.UUID | None:
+        if tenant_id in system_user_ids:
+            return system_user_ids[tenant_id]
+        user = (
+            await db.execute(
+                select(User).where(
+                    User.tenant_id == tenant_id,
+                    User.is_system.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        user_id = user.id if user is not None else None
+        system_user_ids[tenant_id] = user_id
+        return user_id
 
     for event in events:
         matched = await _matching_triggers(db, event=event)
         started_any = False
+        if not matched:
+            event.status = "ignored"
+            event.processed_at = now
+            dispatched += 1
+            continue
+
+        user_id = await system_user_id_for(event.tenant_id)
+
+        if user_id is None:
+            event.status = "ignored"
+            event.processed_at = now
+            event.error = "no system user for tenant"
+            dispatched += 1
+            continue
 
         for trigger in matched:
             if not _cooldown_elapsed(trigger, now):
-                continue
-            user_id = event.user_id
-            if user_id is None:
-                event.error = "event has no user_id; workflow trigger skipped"
                 continue
             try:
                 await start_workflow(

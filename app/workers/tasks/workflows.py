@@ -17,13 +17,32 @@ Two tasks:
 """
 from __future__ import annotations
 
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.action import ActionRecord
+from app.db.models.user import User
 from app.db.models.workflow import WorkflowInstance
 from app.services.workflows.base import WorkflowContext
 from app.services.workflows.engine import resume_instance, run_instance
+
+
+async def _workflow_user_id(
+    db: AsyncSession, instance: WorkflowInstance
+) -> uuid.UUID | None:
+    if instance.triggered_by_user_id is not None:
+        return instance.triggered_by_user_id
+    system_user = (
+        await db.execute(
+            select(User).where(
+                User.tenant_id == instance.tenant_id,
+                User.is_system.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    return system_user.id if system_user is not None else None
 
 
 async def run_pending_workflows_once(db: AsyncSession) -> int:
@@ -38,9 +57,16 @@ async def run_pending_workflows_once(db: AsyncSession) -> int:
     if instance is None:
         return 0
 
+    user_id = await _workflow_user_id(db, instance)
+    if user_id is None:
+        instance.status = "failed"
+        instance.error = "no system user for tenant"
+        await db.flush()
+        return 1
+
     context = WorkflowContext(
         tenant_id=instance.tenant_id,
-        user_id=instance.triggered_by_user_id or instance.tenant_id,
+        user_id=user_id,
         decision_run_id=instance.decision_run_id,
         source_ids=[],
         bag=dict(instance.workflow_context),
@@ -68,9 +94,16 @@ async def run_waiting_workflows_once(db: AsyncSession) -> int:
         return 0
     instance, _action = row
 
+    user_id = await _workflow_user_id(db, instance)
+    if user_id is None:
+        instance.status = "failed"
+        instance.error = "no system user for tenant"
+        await db.flush()
+        return 1
+
     await resume_instance(
         db,
         instance=instance,
-        user_id=instance.triggered_by_user_id or instance.tenant_id,
+        user_id=user_id,
     )
     return 1

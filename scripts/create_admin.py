@@ -13,15 +13,46 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import secrets
 import sys
+import uuid
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.seed import ensure_permission_catalog, seed_tenant_roles
 from app.db.session import SessionLocal
+
+
+SYSTEM_EMAIL_TEMPLATE = "system+{tenant_id}@sansa.local"
+
+
+async def ensure_system_user(db: AsyncSession, *, tenant_id: uuid.UUID) -> User:
+    existing = (
+        await db.execute(
+            select(User).where(
+                User.tenant_id == tenant_id,
+                User.is_system.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    user = User(
+        tenant_id=tenant_id,
+        email=SYSTEM_EMAIL_TEMPLATE.format(tenant_id=tenant_id),
+        password_hash=hash_password(secrets.token_urlsafe(48)),
+        full_name="System",
+        is_active=True,
+        is_system=True,
+    )
+    db.add(user)
+    await db.flush()
+    return user
 
 
 async def run(
@@ -46,6 +77,7 @@ async def run(
         await ensure_permission_catalog(db)
         roles = await seed_tenant_roles(db, tenant_id=tenant.id)
 
+
         admin_role = roles["admin"]
         user = User(
             tenant_id=tenant.id,
@@ -58,12 +90,12 @@ async def run(
         db.add(user)
         await db.flush()
 
+        await ensure_system_user(db, tenant_id=tenant.id)
         await db.commit()
 
         print(f"tenant_id = {tenant.id}")
         print(f"user_id   = {user.id}")
         print(f"email     = {admin_email}")
-
 
 def main() -> None:
     p = argparse.ArgumentParser()
@@ -79,7 +111,6 @@ def main() -> None:
         admin_email=args.admin_email,
         admin_password=args.admin_password,
     ))
-
 
 if __name__ == "__main__":
     main()
