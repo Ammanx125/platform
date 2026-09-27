@@ -1,6 +1,11 @@
 # tests/integration/test_decisions.py
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from app.db.models.audit import AuditEvent
+from app.db.session import SessionLocal
+from app.services.audit import types as audit_types
 
 
 def _csrf(client: AsyncClient) -> dict[str, str]:
@@ -31,6 +36,18 @@ async def test_run_decision_with_mock_llm(
     assert body["llm_provider"] == "mock"
     assert body["llm_summary"] == "Mock response"
     assert body["finished_at"] is not None
+    async with SessionLocal() as db:
+        audit_event = (
+            await db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.subject_id == body["id"],
+                    AuditEvent.event_type == audit_types.DECISION_CREATED,
+                )
+            )
+        ).scalar_one()
+        assert audit_event.actor_user_id == two_tenants["user_a"]
+        assert audit_event.subject_type == "decision_run"
+        assert audit_event.event_metadata["query"] == body["query"]
 
 
 @pytest.mark.asyncio

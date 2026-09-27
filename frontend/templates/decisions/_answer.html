@@ -1,0 +1,65 @@
+{% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+{% else %}
+  <article class="brief">
+    <header class="brief-header">
+      <span class="brief-question">Decision brief</span>
+      <a href="/decisions/{{ decision_id }}" class="brief-time">Open decision →</a>
+    </header>
+
+    {% if summary %}
+      <section class="brief-section">
+        <div class="brief-section-label">Answer</div>
+        <div class="brief-conclusion">{{ summary }}</div>
+      </section>
+    {% else %}
+      <section class="brief-section">
+        <div class="brief-section-label">Answer</div>
+        <div class="muted">No conclusion was produced for this question.</div>
+      </section>
+    {% endif %}
+
+    {% if validated_claims %}
+      <section class="brief-section">
+        <div class="brief-section-label">Why this is believed</div>
+        <div class="evidence-list">
+          {% for c in validated_claims %}
+            <div class="claim">
+              <div class="claim-text">{{ c.text }}</div>
+              <div class="claim-source">
+                {% for eid in c.evidence_ids %}[{{ eid }}]{% if not loop.last %} {% endif %}{% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if tool_calls %}
+      <section class="brief-section">
+        <div class="brief-section-label">Recommended action</div>
+        <div class="evidence-list">
+          {% for t in tool_calls %}
+            <div class="evidence-item">
+              <div>
+                <div>{{ t.name }}</div>
+                {% if t.rationale %}<div class="row-secondary">{{ t.rationale }}</div>{% endif %}
+              </div>
+              <div>
+                {% if t.status == "executed" %}<span class="badge badge-success">{{ t.status }}</span>
+                {% elif t.status == "pending_approval" %}<span class="badge badge-warning">awaiting approval</span>
+                {% elif t.status in ("rejected", "failed") %}<span class="badge badge-danger">{{ t.status }}</span>
+                {% else %}<span class="badge badge-neutral">{{ t.status }}</span>{% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    <footer class="brief-footer">
+      <span class="muted">Evidence and calculations are recorded with the decision.</span>
+      <a href="/decisions/{{ decision_id }}">View full decision →</a>
+    </footer>
+  </article>
+{% endif %}

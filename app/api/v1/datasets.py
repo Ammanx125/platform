@@ -104,7 +104,7 @@ async def upload_dataset(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
-    _user: Annotated[User, Depends(require_permission("dataset:write"))],
+    user: Annotated[User, Depends(require_permission("dataset:write"))],
     file: UploadFile = File(...),  # noqa: B008
 ) -> IngestionJob:
     source = (
@@ -177,6 +177,8 @@ async def upload_dataset(
         tenant_id=tenant_id,
         event_type=event_types.FILE_OBSERVED,
         source_id=source.id,
+        user_id=user.id,
+        actor_kind="user",
         payload={
             "path": file.filename or storage_key,
             "byte_size": len(content),

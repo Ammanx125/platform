@@ -1,0 +1,24 @@
+<header class="topbar">
+  <div class="topbar-left">
+    <a href="/" class="wordmark">{{ app_name }}</a>
+    {% if tenant_name %}<span class="workspace">{{ tenant_name }}</span>{% endif %}
+  </div>
+
+  <div class="topbar-center">
+    {% include "components/loop_indicator.html" %}
+  </div>
+
+  <div class="topbar-right">
+    <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Enable dark mode">
+      <span class="theme-toggle-track" aria-hidden="true"><span></span></span>
+      <span>Dark mode</span>
+    </button>
+    <span class="user">{{ user_email }}</span>
+    <button class="btn btn-sm"
+            hx-post="/logout"
+            hx-swap="none"
+            hx-on::after-request="if(event.detail.successful) window.location.href='/login'">
+      Sign out
+    </button>
+  </div>
+</header>

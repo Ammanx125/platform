@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Data · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <h1 class="page-title">Data sources</h1>
+  <p class="page-subtitle">Every source Sansa has ingested or is connected to.</p>
+</header>
+
+<section class="section">
+  <div class="table-wrap">
+    {% if sources %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th><th>Type</th><th>Latest job</th><th class="cell-num">Total</th><th class="cell-num">Failed</th><th>Created</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for s in sources %}
+          {% set c = job_counts.get(s.id, {}) %}
+          <tr>
+            <td><a href="/datasets/{{ s.id }}">{{ s.name }}</a></td>
+            <td><span class="badge badge-neutral">{{ s.source_type }}</span></td>
+            <td>
+              {% if c.latest_status == "succeeded" %}<span class="badge badge-success">{{ c.latest_status }}</span>
+              {% elif c.latest_status == "failed" %}<span class="badge badge-danger">{{ c.latest_status }}</span>
+              {% elif c.latest_status == "running" %}<span class="badge badge-info">{{ c.latest_status }}</span>
+              {% elif c.latest_status == "pending" %}<span class="badge badge-warning">{{ c.latest_status }}</span>
+              {% else %}<span class="faint">—</span>{% endif %}
+            </td>
+            <td class="cell-num">{{ c.total or 0 }}</td>
+            <td class="cell-num">{{ c.failed or 0 }}</td>
+            <td class="cell-mono muted text-xs">{{ s.created_at.strftime("%Y-%m-%d") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">
+        <div class="empty-title">No data sources</div>
+        <div class="empty-detail">Register a source through the API to begin ingesting data.</div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

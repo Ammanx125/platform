@@ -6,9 +6,11 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.db.models.audit import AuditEvent
 from app.db.models.dataset import IngestionJob
 from app.db.models.knowledge import Chunk, Document
 from app.db.session import SessionLocal
+from app.services.audit import types as audit_types
 from app.services.ingestion.service import run_job
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "sample.pdf"
@@ -55,6 +57,17 @@ async def test_pdf_upload_creates_document(
             await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
         ).scalar_one()
         assert job.status == "succeeded", job.error_message
+        audit_event = (
+            await db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.subject_id == job.id,
+                    AuditEvent.event_type == audit_types.INGESTION_COMPLETED,
+                )
+            )
+        ).scalar_one()
+        assert audit_event.subject_type == "ingestion_job"
+        assert audit_event.event_metadata["source_id"] == ds_id
+        assert audit_event.event_metadata["source_type"] == "pdf"
 
         docs = (
             await db.execute(
@@ -122,3 +135,14 @@ async def test_pdf_rejects_empty_file(
             await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
         ).scalar_one()
         assert job.status == "failed"
+        audit_event = (
+            await db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.subject_id == job.id,
+                    AuditEvent.event_type == audit_types.INGESTION_FAILED,
+                )
+            )
+        ).scalar_one()
+        assert audit_event.subject_type == "ingestion_job"
+        assert audit_event.event_metadata["source_id"] == str(job.source_id)
+        assert "pdf file is empty" in audit_event.event_metadata["error"]

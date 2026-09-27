@@ -25,6 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.event import Event
 from app.services.security.redaction import redact_dict
 
+_ALLOWED_ACTOR_KINDS = frozenset({"user", "system", "service"})
+
 
 async def record_event(
     db: AsyncSession,
@@ -34,6 +36,7 @@ async def record_event(
     payload: dict[str, Any] | None = None,
     source_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
+    actor_kind: str = "system",
     occurred_at: datetime | None = None,
     dedup_key: str | None = None,
 ) -> tuple[Event, bool]:
@@ -43,6 +46,12 @@ async def record_event(
     created is False when a deduplicated event already existed; the returned
     Event is the existing one.
     """
+    if actor_kind not in _ALLOWED_ACTOR_KINDS:
+        raise ValueError(
+            f"actor_kind must be one of {sorted(_ALLOWED_ACTOR_KINDS)}, "
+            f"got {actor_kind!r}"
+        )
+
     if dedup_key is not None:
         existing = (
             await db.execute(
@@ -61,6 +70,7 @@ async def record_event(
         event_type=event_type,
         source_id=source_id,
         user_id=user_id,
+        actor_kind=actor_kind,
         occurred_at=occurred_at or now,
         received_at=now,
         dedup_key=dedup_key,
@@ -78,6 +88,7 @@ async def list_events(
     tenant_id: uuid.UUID,
     event_type: str | None = None,
     source_id: uuid.UUID | None = None,
+    actor_kind: str | None = None,
     since: datetime | None = None,
     status: str | None = None,
     limit: int = 100,
@@ -92,6 +103,8 @@ async def list_events(
         stmt = stmt.where(Event.event_type == event_type)
     if source_id is not None:
         stmt = stmt.where(Event.source_id == source_id)
+    if actor_kind is not None:
+        stmt = stmt.where(Event.actor_kind == actor_kind)
     if since is not None:
         stmt = stmt.where(Event.received_at >= since)
     if status is not None:

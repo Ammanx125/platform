@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <meta name="description" content="Operational decision and workflow intelligence for the business.">
+  <script>
+    try {
+      if (localStorage.getItem("sansa-theme") === "dark") {
+        document.documentElement.dataset.theme = "dark";
+      }
+    } catch (_) {}
+  </script>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script>
+    window.SANSA_CSRF_COOKIE = "{{ csrf_cookie_name }}";
+    window.SANSA_CSRF_HEADER = "{{ csrf_header_name }}";
+  </script>
+  <script src="/static/js/htmx.min.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+{% block body %}
+  <div class="shell">
+    {% include "components/topbar.html" %}
+    {% include "components/sidebar.html" %}
+    <main class="main">
+      <div class="page">
+        {% block main %}{% endblock %}
+      </div>
+    </main>
+  </div>
+{% endblock %}
+</body>
+</html>

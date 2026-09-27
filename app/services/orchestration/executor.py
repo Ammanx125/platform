@@ -319,4 +319,26 @@ async def persist(
             action_record.decision_run_id = row.id
         await db.flush()
 
+    from app.services.audit import service as audit_service
+    from app.services.audit import types as audit_types
+
+    await audit_service.emit(
+        db,
+        tenant_id=result.tenant_id,
+        event_type=audit_types.DECISION_CREATED,
+        actor_user_id=result.user_id,
+        subject_type="decision_run",
+        subject_id=row.id,
+        metadata={
+            "query": result.query[:200],
+            "plan_routing": result.plan.routing_method,
+            "llm_provider": llm.provider if llm else None,
+            "llm_model": llm.model_name if llm else None,
+            "validated_claim_count": len(result.validated_claims),
+            "dropped_claim_count": len(result.dropped_claims),
+            "action_count": len(result.action_records),
+            "duration_ms": result.duration_ms,
+        },
+        message=f"decision created for: {result.query[:120]}",
+    )
     return row

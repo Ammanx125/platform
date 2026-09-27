@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Overview · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <div class="eyebrow">Operational overview</div>
+  <h1 class="page-title">Overview</h1>
+  <p class="page-subtitle">Business state and management attention.</p>
+</header>
+
+{% set approvals_count = pending_actions|length %}
+{% set anomaly_count = recent_anomalies|selectattr("severity", "in", ["error", "critical"])|list|length %}
+<div class="attention" aria-label="Priority alerts">
+  <a class="attention-item" href="/approvals" data-empty="{{ 'true' if approvals_count == 0 else 'false' }}">
+    <span class="attention-count">{{ approvals_count }}</span>
+    <span class="attention-label">pending approval{{ "" if approvals_count == 1 else "s" }}</span>
+  </a>
+  <a class="attention-item" href="/datasets" data-empty="{{ 'true' if anomaly_count == 0 else 'false' }}">
+    <span class="attention-count">{{ anomaly_count }}</span>
+    <span class="attention-label">high-severity anomal{{ "y" if anomaly_count == 1 else "ies" }}</span>
+  </a>
+</div>
+
+<section class="section panel">
+  <div class="section-header">
+    <h2 class="section-title">Ask Sansa</h2>
+    <span class="section-meta">Decision support</span>
+  </div>
+  <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-indicator">
+    <input class="input" type="text" name="query" required autocomplete="off" placeholder="What would you like to understand?">
+    <button type="submit" class="btn btn-primary">Ask Sansa</button>
+  </form>
+  <div class="ask-guidance">
+    <span id="ask-indicator" class="htmx-indicator loading-text">Analyzing…</span>
+    <span class="ask-hint">Ask about performance, anomalies, approvals, operations, or anything else in your connected data.</span>
+  </div>
+  <div id="ask-result"></div>
+</section>
+
+{% if kpis %}
+<section class="section">
+  <div class="section-header">
+    <h2 class="section-title">Key business state</h2>
+  </div>
+  <div class="stat-row">
+    {% for k in kpis[:4] %}
+      <div class="stat">
+        <div class="stat-label">{{ k.display_name }}</div>
+        <div class="stat-value">
+          {% if k.value is mapping %}
+            {{ k.value|length }}<span class="stat-unit">groups</span>
+          {% elif k.value is not none %}
+            {% if k.value is number %}
+              {{ "%.2f"|format(k.value) }}
+            {% else %}
+              {{ k.value }}
+            {% endif %}
+            {% if k.unit %}<span class="stat-unit">{{ k.unit }}</span>{% endif %}
+          {% else %}
+            <span class="faint">—</span>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div class="content-grid">
+  <section class="section panel">
+    <header class="section-header">
+      <h2 class="section-title">Recent anomalies</h2>
+    </header>
+    {% if recent_anomalies %}
+      <div class="row-list">
+        {% for a in recent_anomalies %}
+          <div class="row">
+            <div>
+              <div class="row-primary">{{ a.detector_key }}</div>
+              <div class="row-secondary">
+                {% if a.group_label %}{{ a.group_label }} · {% endif %}{{ "%.4g"|format(a.value) }}
+              </div>
+            </div>
+            <div class="row-meta">{{ a.point_timestamp.strftime("%Y-%m-%d") }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="row-list">
+        <div class="empty">
+          <div class="empty-title">No anomalies detected</div>
+          <div class="empty-detail">The platform will surface unusual patterns as it analyzes your data.</div>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="section panel">
+    <header class="section-header">
+      <h2 class="section-title">Recent decisions</h2>
+      <a class="section-action" href="/decisions">All decisions</a>
+    </header>
+    {% if recent_decisions %}
+      <div class="row-list">
+        {% for d in recent_decisions %}
+          <a class="row" href="/decisions/{{ d.id }}" style="color:inherit;">
+            <div>
+              <div class="row-primary">{{ d.query|truncate(80) }}</div>
+              <div class="row-secondary">{{ d.llm_model or "—" }}</div>
+            </div>
+            <div class="row-meta">{{ d.created_at.strftime("%m-%d %H:%M") }}</div>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="row-list">
+        <div class="empty">
+          <div class="empty-title">No decisions yet</div>
+          <div class="empty-detail">Ask Sansa a question above to run your first decision.</div>
+        </div>
+      </div>
+    {% endif %}
+  </section>
+</div>
+
+{% if pending_actions %}
+<section class="section panel">
+  <header class="section-header">
+    <h2 class="section-title">Awaiting approval</h2>
+    <a class="section-action" href="/approvals">Open approval center</a>
+  </header>
+  <div class="row-list">
+    {% for a in pending_actions[:3] %}
+      <a class="row" href="/approvals" style="color:inherit;">
+        <div>
+          <div class="row-primary">{{ a.tool_name }}</div>
+          {% if a.rationale %}<div class="row-secondary">{{ a.rationale|truncate(120) }}</div>{% endif %}
+        </div>
+        <div class="row-meta">{{ a.proposed_at.strftime("%m-%d %H:%M") if a.proposed_at else "" }}</div>
+      </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

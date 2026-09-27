@@ -168,6 +168,7 @@ async def record_delivery(
         tenant_id=source.tenant_id,
         event_type=event_types.WEBHOOK_RECEIVED,
         source_id=source.id,
+        actor_kind="service",
         payload={
             "delivery_id": str(delivery.id),
             "job_id": str(delivery.job_id) if delivery.job_id else None,

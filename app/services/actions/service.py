@@ -26,7 +26,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.action import ActionRecord
 from app.db.models.user import User
 from app.services.actions import policy as policy_service
-from app.services.actions.audit import emit_event
 from app.services.actions.base import (
     ActionContext,
     ActionError,
@@ -34,6 +33,7 @@ from app.services.actions.base import (
 )
 from app.services.actions.registry import get as get_action
 from app.services.actions.validators import run_validators
+from app.services.audit.service import emit as emit_event
 from app.services.llm.schemas import ToolCall
 from app.services.security.redaction import redact_dict
 

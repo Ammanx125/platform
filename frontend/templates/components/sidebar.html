@@ -1,0 +1,14 @@
+<nav class="nav" aria-label="Primary navigation">
+  <div class="nav-group">
+    <div class="nav-group-label">Workspace</div>
+    <a class="nav-item" href="/" {% if active_nav == "overview" %}aria-current="page"{% endif %}>Overview</a>
+    <a class="nav-item" href="/decisions" {% if active_nav == "decisions" %}aria-current="page"{% endif %}>Decisions</a>
+    <a class="nav-item" href="/approvals" {% if active_nav == "approvals" %}aria-current="page"{% endif %}>Approvals</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-group-label">Operations</div>
+    <a class="nav-item" href="/datasets" {% if active_nav == "datasets" %}aria-current="page"{% endif %}>Data</a>
+    <a class="nav-item" href="/workflows" {% if active_nav == "workflows" %}aria-current="page"{% endif %}>Workflows</a>
+    <a class="nav-item" href="/audit" {% if active_nav == "audit" %}aria-current="page"{% endif %}>Audit</a>
+  </div>
+</nav>

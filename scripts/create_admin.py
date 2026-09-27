@@ -26,7 +26,6 @@ from app.db.models.user import User
 from app.db.seed import ensure_permission_catalog, seed_tenant_roles
 from app.db.session import SessionLocal
 
-
 SYSTEM_EMAIL_TEMPLATE = "system+{tenant_id}@sansa.local"
 
 

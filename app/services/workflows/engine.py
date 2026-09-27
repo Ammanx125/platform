@@ -190,6 +190,30 @@ async def start_workflow(
 
 # ---------- running an instance ----------
 
+async def _emit_failed(
+    db: AsyncSession,
+    *,
+    instance: WorkflowInstance,
+    user_id: uuid.UUID | None,
+) -> None:
+    from app.services.audit import service as audit_service
+    from app.services.audit import types as audit_types
+
+    await audit_service.emit(
+        db,
+        tenant_id=instance.tenant_id,
+        event_type=audit_types.WORKFLOW_FAILED,
+        actor_user_id=user_id,
+        subject_type="workflow_instance",
+        subject_id=instance.id,
+        metadata={
+            "workflow_key": instance.workflow_key,
+            "error": (instance.error or "")[:500] or None,
+        },
+        message=f"workflow {instance.workflow_key} failed",
+    )
+
+
 async def run_instance(
     db: AsyncSession,
     *,
@@ -207,6 +231,7 @@ async def run_instance(
         instance.status = "failed"
         instance.error = f"workflow {instance.workflow_key!r} no longer registered"
         instance.finished_at = datetime.now(UTC)
+        await _emit_failed(db, instance=instance, user_id=context.user_id)
         await db.flush()
         return instance
 
@@ -240,6 +265,7 @@ async def run_instance(
             instance.finished_at = datetime.now(UTC)
             instance.duration_ms = int((time.perf_counter() - start_wall) * 1000)
             instance.workflow_context = dict(context.bag)
+            await _emit_failed(db, instance=instance, user_id=context.user_id)
             await db.flush()
             return instance
         except Exception as exc:  # noqa: BLE001
@@ -251,6 +277,7 @@ async def run_instance(
             instance.finished_at = datetime.now(UTC)
             instance.duration_ms = int((time.perf_counter() - start_wall) * 1000)
             instance.workflow_context = dict(context.bag)
+            await _emit_failed(db, instance=instance, user_id=context.user_id)
             await db.flush()
             return instance
 
@@ -282,6 +309,7 @@ async def run_instance(
             else:
                 instance.status = "failed"
                 instance.error = f"unknown wait_reason: {result.wait_reason!r}"
+                await _emit_failed(db, instance=instance, user_id=context.user_id)
             instance.workflow_context = dict(context.bag)
             instance.duration_ms = int((time.perf_counter() - start_wall) * 1000)
             await db.flush()
@@ -296,6 +324,7 @@ async def run_instance(
         instance.finished_at = datetime.now(UTC)
         instance.duration_ms = int((time.perf_counter() - start_wall) * 1000)
         instance.workflow_context = dict(context.bag)
+        await _emit_failed(db, instance=instance, user_id=context.user_id)
         await db.flush()
         return instance
 
@@ -305,6 +334,23 @@ async def run_instance(
     instance.duration_ms = int((time.perf_counter() - start_wall) * 1000)
     instance.workflow_context = dict(context.bag)
     await db.flush()
+
+    from app.services.audit import service as audit_service
+    from app.services.audit import types as audit_types
+
+    await audit_service.emit(
+        db,
+        tenant_id=instance.tenant_id,
+        event_type=audit_types.WORKFLOW_COMPLETED,
+        actor_user_id=context.user_id,
+        subject_type="workflow_instance",
+        subject_id=instance.id,
+        metadata={
+            "workflow_key": instance.workflow_key,
+            "duration_ms": instance.duration_ms,
+        },
+        message=f"workflow {instance.workflow_key} completed",
+    )
     return instance
 
 

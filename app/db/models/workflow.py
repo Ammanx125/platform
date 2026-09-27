@@ -4,7 +4,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -112,14 +121,23 @@ class WorkflowTrigger(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     """
     A per-tenant binding: "when an event of type X occurs, start workflow W."
 
-    event_type_filter: exact match against Event.event_type, or "*" to match all.
-    source_id_filter: if set, only events from this source trigger the workflow.
-    enabled: toggle without deleting.
-    cooldown_seconds: don't retrigger this workflow for the same tenant
-        within this window. Used to avoid a burst of events (e.g. 100
-        stock-drop anomalies in one second) spawning 100 workflow runs.
-    trigger_params: passed to start_workflow as trigger_metadata, plus
-        optional source_ids/workflow_params overrides.
+    Matching:
+      - event_type_filter: exact match against Event.event_type, or "*" for
+        all events. Applied first.
+      - source_id_filter: if set, only events whose source_id equals it.
+        Null means "any source."
+
+    Cooldown: after firing, the trigger won't fire again for cooldown_seconds.
+    Prevents a burst of events (e.g. 100 anomalies from one detector run)
+    from spawning many workflow instances.
+
+    trigger_params is merged into the started instance's trigger_metadata.
+    Common keys:
+      - source_ids: list of uuid strings to scope the workflow's data
+      - any other workflow-specific metadata
+
+    Unique on (tenant_id, workflow_key, event_type_filter, source_id_filter)
+    so a tenant can't accidentally create two identical bindings.
     """
     __tablename__ = "workflow_triggers"
 
@@ -131,8 +149,8 @@ class WorkflowTrigger(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         nullable=True,
         index=True,
     )
-    enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
-    cooldown_seconds: Mapped[int] = mapped_column(nullable=False, default=60)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    cooldown_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     trigger_params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     last_fired_at: Mapped[datetime | None] = mapped_column(

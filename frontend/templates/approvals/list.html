@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Approvals · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <h1 class="page-title">Approvals</h1>
+  <p class="page-subtitle">
+    {% if actions %}
+      {{ actions|length }} action{{ "" if actions|length == 1 else "s" }} require your review.
+    {% else %}
+      Nothing waiting on you.
+    {% endif %}
+    You cannot approve your own proposals.
+  </p>
+</header>
+
+<section class="section">
+  <div class="row-list">
+    {% if actions %}
+      {% for a in actions %}
+        {% include "approvals/_row.html" with context %}
+      {% endfor %}
+    {% else %}
+      <div class="empty">
+        <div class="empty-title">No pending approvals</div>
+        <div class="empty-detail">There are currently no actions waiting for authorization.</div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}
