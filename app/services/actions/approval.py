@@ -22,8 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.action import ActionRecord
-from app.services.actions.audit import emit_event
 from app.services.actions.service import execute_approved
+from app.services.audit.service import emit as emit_event
 
 
 class ApprovalError(Exception):

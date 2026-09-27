@@ -5,4 +5,13 @@
     <a class="nav-item" href="/decisions" {% if active_nav == "decisions" %}aria-current="page"{% endif %}>Decisions</a>
     <a class="nav-item" href="/approvals" {% if active_nav == "approvals" %}aria-current="page"{% endif %}>Approvals</a>
   </div>
+  <div class="nav-group">
+    <div class="nav-group-label">Data</div>
+    <a class="nav-item" href="/datasets" {% if active_nav == "datasets" %}aria-current="page"{% endif %}>Data sources</a>
+  </div>
+  <div class="nav-group">
+    <div class="nav-group-label">System</div>
+    <a class="nav-item" href="/workflows" {% if active_nav == "workflows" %}aria-current="page"{% endif %}>Workflows</a>
+    <a class="nav-item" href="/audit" {% if active_nav == "audit" %}aria-current="page"{% endif %}>Audit</a>
+  </div>
 </nav>

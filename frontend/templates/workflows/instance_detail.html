@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Instance · {{ app_name }}{% endblock %}
+{% block main %}
+
+<div class="page-header">
+  <h1 class="page-title mono">{{ instance.workflow_key }}</h1>
+  <p class="page-subtitle">
+    <span class="mono text-xs">{{ instance.id }}</span>
+    {% if instance.started_at %}· started {{ instance.started_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+    {% if instance.duration_ms %}· {{ instance.duration_ms }} ms{% endif %}
+  </p>
+</div>
+
+<section class="card mb-6">
+  <div class="card-header">
+    <h2 class="card-title">Status</h2>
+    {% if instance.status == "completed" %}<span class="badge badge-success">{{ instance.status }}</span>
+    {% elif instance.status in ("failed", "rejected") %}<span class="badge badge-danger">{{ instance.status }}</span>
+    {% elif instance.status.startswith("waiting") %}<span class="badge badge-warning">{{ instance.status }}</span>
+    {% elif instance.status == "running" %}<span class="badge badge-info">{{ instance.status }}</span>
+    {% else %}<span class="badge badge-neutral">{{ instance.status }}</span>{% endif %}
+  </div>
+  <div class="card-body">
+    <dl style="margin:0; display:grid; grid-template-columns:180px 1fr; gap:8px 16px; font-size:13px;">
+      <dt class="muted">Trigger</dt><dd>{{ instance.trigger_type }}</dd>
+      {% if instance.pending_approval_step %}
+        <dt class="muted">Pending approval step</dt><dd class="mono text-xs">{{ instance.pending_approval_step }}</dd>
+      {% endif %}
+      {% if instance.pending_action_id %}
+        <dt class="muted">Waiting on action</dt><dd class="mono text-xs">{{ instance.pending_action_id }}</dd>
+      {% endif %}
+      {% if instance.error %}
+        <dt class="muted">Error</dt><dd><div class="alert alert-danger text-sm">{{ instance.error }}</div></dd>
+      {% endif %}
+    </dl>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header"><h2 class="card-title">Steps</h2></div>
+  <div class="card-body flush">
+    <table class="table">
+      <thead>
+        <tr><th>Step</th><th>Type</th><th>Status</th><th>Output</th></tr>
+      </thead>
+      <tbody>
+      {% for s in instance.step_states %}
+        <tr>
+          <td class="mono text-xs">{{ s.name }}</td>
+          <td><span class="badge badge-neutral">{{ s.type }}</span></td>
+          <td>
+            {% if s.status == "completed" %}<span class="badge badge-success">{{ s.status }}</span>
+            {% elif s.status == "failed" %}<span class="badge badge-danger">{{ s.status }}</span>
+            {% elif s.status == "waiting" %}<span class="badge badge-warning">{{ s.status }}</span>
+            {% elif s.status == "running" %}<span class="badge badge-info">{{ s.status }}</span>
+            {% else %}<span class="badge badge-neutral">{{ s.status }}</span>{% endif %}
+          </td>
+          <td class="text-xs muted">
+            {% if s.error %}
+              <div class="alert alert-danger text-xs" style="margin:0;">{{ s.error }}</div>
+            {% elif s.output %}
+              <details>
+                <summary class="mono" style="cursor:pointer;">output</summary>
+                <pre class="mono text-xs" style="margin:8px 0 0; white-space:pre-wrap; word-break:break-word;">{{ s.output | tojson(indent=2) }}</pre>
+              </details>
+            {% else %}
+              <span class="faint">—</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if instance.workflow_context %}
+<section class="card mt-6">
+  <div class="card-header"><h2 class="card-title">Context</h2></div>
+  <div class="card-body">
+    <pre class="mono text-xs" style="margin:0; white-space:pre-wrap; word-break:break-word;">{{ instance.workflow_context | tojson(indent=2) }}</pre>
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

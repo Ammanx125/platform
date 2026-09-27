@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Audit · {{ app_name }}{% endblock %}
+{% block main %}
+
+<div class="page-header">
+  <h1 class="page-title">Audit</h1>
+  <p class="page-subtitle">
+    Meaningful state transitions, in order. Newest first. Read-only.
+  </p>
+</div>
+
+<section class="card">
+  <div class="card-header">
+    <h2 class="card-title">Events</h2>
+    <form method="get" action="/audit" class="row" style="gap:8px; margin:0;">
+      <select class="select" name="event_type" style="width:220px;" onchange="this.form.submit()">
+        <option value="">All event types</option>
+        {% for t in known_types %}
+          <option value="{{ t }}" {% if t == current_filter %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="card-body flush">
+    {% if events %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Event</th>
+            <th>Subject</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for e in events %}
+          <tr>
+            <td class="cell-mono muted text-xs" style="white-space:nowrap;">
+              {{ e.created_at.strftime("%Y-%m-%d %H:%M:%S") }}
+            </td>
+            <td><span class="badge badge-neutral">{{ e.event_type }}</span></td>
+            <td class="mono text-xs">
+              {% if e.subject_type %}
+                {{ e.subject_type }}
+                {% if e.subject_id %}<span class="faint">· {{ e.subject_id }}</span>{% endif %}
+              {% else %}
+                <span class="faint">—</span>
+              {% endif %}
+            </td>
+            <td class="text-sm">{{ e.message or "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">No audit events yet.</div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

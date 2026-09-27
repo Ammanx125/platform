@@ -5,8 +5,10 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.db.models.audit import AuditEvent
 from app.db.models.dataset import IngestionJob, StagedRow
 from app.db.session import SessionLocal
+from app.services.audit import types as audit_types
 from app.services.ingestion.service import run_job
 
 CSV = b"supplier,product,qty,price\nAcme,Bolt,100,0.42\nBeacon,Nut,200,0.18\n"
@@ -49,6 +51,21 @@ async def test_csv_upload_and_run(client: AsyncClient, two_tenants: dict) -> Non
         assert job.status == "succeeded"
         assert job.rows_read == 2
         assert job.rows_staged == 2
+        audit_event = (
+            await db.execute(
+                select(AuditEvent).where(
+                    AuditEvent.subject_id == job.id,
+                    AuditEvent.event_type == audit_types.INGESTION_COMPLETED,
+                )
+            )
+        ).scalar_one()
+        assert audit_event.subject_type == "ingestion_job"
+        assert audit_event.event_metadata == {
+            "source_id": ds_id,
+            "source_type": "csv",
+            "rows_read": 2,
+            "rows_staged": 2,
+        }
 
         staged = (await db.execute(select(StagedRow).where(StagedRow.job_id == job_id))).scalars().all()
         assert len(staged) == 2

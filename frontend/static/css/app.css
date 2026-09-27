@@ -647,3 +647,61 @@ button, input, textarea, select { font: inherit; color: inherit; }
   from { transform: translateY(6px); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
 }
+
+/* ---------- details / summary ---------- */
+
+details {
+  border-radius: var(--radius-sm);
+}
+
+details > summary {
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--fs-12);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+details > summary::-webkit-details-marker { display: none; }
+
+details > summary::before {
+  content: "▸ ";
+  color: var(--text-faint);
+}
+
+details[open] > summary::before {
+  content: "▾ ";
+}
+
+details > summary:hover { color: var(--text); }
+
+details pre {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: var(--surface-sunk);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+
+/* ---------- decision detail ---------- */
+
+.decision-section {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.decision-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.decision-section-label {
+  font-size: var(--fs-11);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin-bottom: var(--space-3);
+}

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}{{ source.name }} · {{ app_name }}{% endblock %}
+{% block main %}
+
+<div class="page-header">
+  <h1 class="page-title">{{ source.name }}</h1>
+  <p class="page-subtitle">
+    <span class="badge badge-neutral">{{ source.source_type }}</span>
+    · <span class="mono text-xs">{{ source.id }}</span>
+    · created {{ source.created_at.strftime("%Y-%m-%d") }}
+  </p>
+</div>
+
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-header"><h2 class="card-title">Recent ingestion jobs</h2></div>
+    <div class="card-body flush">
+      {% if jobs %}
+        <table class="table">
+          <thead>
+            <tr><th>Status</th><th>Rows</th><th>Started</th><th>Duration</th></tr>
+          </thead>
+          <tbody>
+          {% for j in jobs %}
+            <tr>
+              <td>
+                {% if j.status == "succeeded" %}<span class="badge badge-success">{{ j.status }}</span>
+                {% elif j.status == "failed" %}<span class="badge badge-danger">{{ j.status }}</span>
+                {% elif j.status == "running" %}<span class="badge badge-info">{{ j.status }}</span>
+                {% else %}<span class="badge badge-neutral">{{ j.status }}</span>{% endif %}
+              </td>
+              <td class="cell-num">{{ j.rows_staged }}</td>
+              <td class="cell-mono muted text-xs">
+                {{ j.started_at.strftime("%Y-%m-%d %H:%M") if j.started_at else "—" }}
+              </td>
+              <td class="cell-mono muted text-xs">
+                {% if j.started_at and j.finished_at %}
+                  {{ ((j.finished_at - j.started_at).total_seconds() * 1000) | int }} ms
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+            {% if j.error_message %}
+              <tr><td colspan="4"><div class="alert alert-danger text-xs">{{ j.error_message }}</div></td></tr>
+            {% endif %}
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No ingestion jobs yet.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><h2 class="card-title">Semantic mappings</h2></div>
+    <div class="card-body flush">
+      {% if mappings %}
+        <table class="table">
+          <thead>
+            <tr><th>Source column</th><th>Concept</th><th>Status</th><th>Confidence</th></tr>
+          </thead>
+          <tbody>
+          {% for m in mappings %}
+            <tr>
+              <td class="mono text-xs">{{ m.source_column }}</td>
+              <td>{{ m.canonical_concept_key }}</td>
+              <td>
+                {% if m.status == "confirmed" %}<span class="badge badge-success">{{ m.status }}</span>
+                {% elif m.status == "proposed" %}<span class="badge badge-info">{{ m.status }}</span>
+                {% else %}<span class="badge badge-neutral">{{ m.status }}</span>{% endif %}
+              </td>
+              <td class="cell-num">
+                {% if m.confidence is not none %}{{ "%.2f"|format(m.confidence) }}{% else %}<span class="faint">—</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No mappings for this source.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if profile %}
+  <section class="card mt-6">
+    <div class="card-header">
+      <h2 class="card-title">Latest data profile</h2>
+      <span class="muted text-xs">
+        {{ profile.row_count }} rows · {{ profile.column_count }} columns
+      </span>
+    </div>
+    <div class="card-body flush">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Column</th>
+            <th>Type</th>
+            <th>Null %</th>
+            <th>Distinct</th>
+            <th>Range</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for col in profile.profile.get("columns", []) %}
+          <tr>
+            <td class="mono text-xs">{{ col.name }}</td>
+            <td><span class="badge badge-neutral">{{ col.inferred_type }}</span></td>
+            <td class="cell-num">
+              {{ "%.0f%%"|format(col.null_pct * 100) }}
+            </td>
+            <td class="cell-num">
+              {% if col.distinct_count >= 0 %}{{ col.distinct_count }}{% else %}<span class="faint">&gt;5k</span>{% endif %}
+            </td>
+            <td class="mono text-xs">
+              {% if col.min is not none and col.max is not none %}
+                {{ col.min }} – {{ col.max }}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if profile.issues %}
+      <div class="card-body" style="border-top:1px solid var(--border);">
+        <div class="evidence-label">Quality issues</div>
+        <table class="table">
+          <tbody>
+          {% for issue in profile.issues %}
+            <tr>
+              <td style="width:60px;">
+                {% if issue.severity == "error" %}<span class="badge badge-danger">{{ issue.severity }}</span>
+                {% elif issue.severity == "warning" %}<span class="badge badge-warning">{{ issue.severity }}</span>
+                {% else %}<span class="badge badge-neutral">{{ issue.severity }}</span>{% endif %}
+              </td>
+              <td class="mono text-xs">{{ issue.code }}</td>
+              <td class="muted text-xs">{{ issue.column or "—" }}</td>
+              <td class="text-sm">{{ issue.detail }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
+{% endif %}
+
+{% endblock %}

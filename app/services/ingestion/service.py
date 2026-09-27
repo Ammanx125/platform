@@ -14,6 +14,8 @@ from app.db.models.dataset import (
     IngestionLineage,
     StagedRow,
 )
+from app.services.audit import service as audit_service
+from app.services.audit import types as audit_types
 from app.services.ingestion.base import IngestionError
 from app.services.ingestion.registry import get_connector
 
@@ -181,6 +183,20 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
                 },
                 dedup_key=f"ingestion.completed:{job.id}",
             )
+            await audit_service.emit(
+                db,
+                tenant_id=job.tenant_id,
+                event_type=audit_types.INGESTION_COMPLETED,
+                subject_type="ingestion_job",
+                subject_id=job.id,
+                metadata={
+                    "source_id": str(source.id),
+                    "source_type": source.source_type,
+                    "rows_read": job.rows_read,
+                    "rows_staged": job.rows_staged,
+                },
+                message=f"ingestion completed for {source.name}",
+            )
             await db.commit()
             return
         else:
@@ -246,6 +262,20 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             },
             dedup_key=f"ingestion.completed:{job.id}",
         )
+        await audit_service.emit(
+            db,
+            tenant_id=job.tenant_id,
+            event_type=audit_types.INGESTION_COMPLETED,
+            subject_type="ingestion_job",
+            subject_id=job.id,
+            metadata={
+                "source_id": str(source.id),
+                "source_type": source.source_type,
+                "rows_read": job.rows_read,
+                "rows_staged": job.rows_staged,
+            },
+            message=f"ingestion completed for {source.name}",
+        )
         await db.commit()
 
     except Exception as exc:  # noqa: BLE001
@@ -271,6 +301,18 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
                     "error": str(exc)[:500],
                 },
                 dedup_key=f"ingestion.failed:{job.id}",
+            )
+            await audit_service.emit(
+                db,
+                tenant_id=job.tenant_id,
+                event_type=audit_types.INGESTION_FAILED,
+                subject_type="ingestion_job",
+                subject_id=job.id,
+                metadata={
+                    "source_id": str(job.source_id),
+                    "error": str(exc)[:500],
+                },
+                message=f"ingestion failed: {str(exc)[:120]}",
             )
             await db.commit()
 

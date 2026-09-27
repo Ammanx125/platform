@@ -13,7 +13,6 @@ from fastapi.templating import Jinja2Templates
 
 from app.core.config import settings
 
-
 _FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 _TEMPLATES_DIR = _FRONTEND_DIR / "templates"
 

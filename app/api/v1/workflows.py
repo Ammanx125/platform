@@ -19,7 +19,9 @@ from app.schemas.workflow import (
     WorkflowResumeRequest,
     WorkflowStartRequest,
 )
-from app.services.actions.audit import emit_event
+from app.services.audit import service as audit_service
+from app.services.audit import types as audit_types
+from app.services.audit.service import emit as emit_event
 from app.services.workflows import engine as workflow_engine
 from app.services.workflows.registry import all_workflows
 from app.services.workflows.registry import get as get_workflow
@@ -211,10 +213,10 @@ async def reject_instance(
     instance.status = "rejected"
     instance.error = body.reason or "rejected by approver"
     instance.finished_at = datetime.now(UTC)
-    await emit_event(
+    await audit_service.emit(
         db,
         tenant_id=tenant_id,
-        event_type="workflow.rejected",
+        event_type=audit_types.WORKFLOW_REJECTED,
         actor_user_id=user.id,
         subject_type="workflow_instance",
         subject_id=instance.id,

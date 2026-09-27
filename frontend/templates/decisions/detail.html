@@ -3,16 +3,13 @@
 {% block main %}
 
 <div class="page-header">
-  <div class="row-between">
-    <div>
-      <h1 class="page-title">{{ decision.query|truncate(100) }}</h1>
-      <p class="page-subtitle">
-        <span class="mono text-xs">{{ decision.id }}</span>
-        · {{ decision.created_at.strftime("%Y-%m-%d %H:%M") }}
-        {% if decision.duration_ms %}· {{ decision.duration_ms }} ms{% endif %}
-      </p>
-    </div>
-  </div>
+  <h1 class="page-title">{{ decision.query|truncate(100) }}</h1>
+  <p class="page-subtitle">
+    <span class="mono text-xs">{{ decision.id }}</span>
+    · {{ decision.created_at.strftime("%Y-%m-%d %H:%M") }}
+    {% if decision.duration_ms %}· {{ decision.duration_ms }} ms{% endif %}
+    {% if decision.llm_model %}· {{ decision.llm_model }}{% endif %}
+  </p>
 </div>
 
 {% if decision.error %}
@@ -26,9 +23,10 @@
       <p style="margin-top:0;">
         {{ decision.llm_summary or "No summary was produced." }}
       </p>
+
       {% if decision.validated_claims %}
-        <div class="evidence-block mt-4">
-          <div class="evidence-label">Claims</div>
+        <div class="decision-section">
+          <div class="decision-section-label">Claims</div>
           {% for c in decision.validated_claims %}
             <div class="evidence-item">
               <div>{{ c.text }}</div>
@@ -41,14 +39,43 @@
       {% endif %}
 
       {% if decision.dropped_claims %}
-        <div class="evidence-block mt-4">
-          <div class="evidence-label">Claims that could not be supported</div>
-          {% for c in decision.dropped_claims %}
-            <div class="evidence-item">
-              <div class="muted">{{ c.text }}</div>
-              <div class="evidence-id">{{ c.reason }}</div>
+        <div class="decision-section">
+          <details>
+            <summary class="decision-section-label" style="margin-bottom:0;">
+              Unsupported claims ({{ decision.dropped_claims|length }})
+            </summary>
+            <div style="margin-top:12px;">
+              {% for c in decision.dropped_claims %}
+                <div class="evidence-item">
+                  <div class="muted">{{ c.text }}</div>
+                  <div class="evidence-id">{{ c.reason }}</div>
+                </div>
+              {% endfor %}
             </div>
-          {% endfor %}
+          </details>
+        </div>
+      {% endif %}
+
+      {% if decision.plan %}
+        <div class="decision-section">
+          <details>
+            <summary class="decision-section-label" style="margin-bottom:0;">
+              Execution plan
+            </summary>
+            <table class="table" style="margin-top:12px;">
+              <thead>
+                <tr><th>Capability</th><th>Reason</th></tr>
+              </thead>
+              <tbody>
+              {% for s in decision.plan %}
+                <tr>
+                  <td class="mono text-xs">{{ s.capability }}</td>
+                  <td class="muted text-xs">{{ s.reason }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </details>
         </div>
       {% endif %}
     </div>
@@ -106,7 +133,7 @@
             <div class="evidence-label">Workflows</div>
             {% for w in decision.evidence.workflows %}
               <div class="evidence-item">
-                {{ w.workflow_key }}
+                <a href="/workflows/instances/{{ w.instance_id }}" class="mono text-xs">{{ w.workflow_key }}</a>
                 <span class="badge badge-neutral">{{ w.status }}</span>
               </div>
             {% endfor %}
@@ -117,7 +144,12 @@
             <div class="evidence-label">Retrieved content</div>
             {% for c in decision.evidence.chunks %}
               <div class="evidence-item">
-                <div class="evidence-id">[{{ c.id }}]</div>
+                <div class="evidence-id">
+                  [{{ c.id }}]
+                  {% if c._injection_flags %}
+                    <span class="evidence-flag">flagged</span>
+                  {% endif %}
+                </div>
                 <div class="evidence-text">{{ c.content[:300] if c.content else "" }}</div>
               </div>
             {% endfor %}
