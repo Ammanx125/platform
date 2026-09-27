@@ -1,0 +1,37 @@
+<tr id="action-{{ a.id }}" class="swap-fade">
+  <td>
+    <div class="mono text-xs">{{ a.tool_name }}</div>
+    {% if a.rationale %}<div class="muted text-xs mt-2">{{ a.rationale }}</div>{% endif %}
+  </td>
+  <td class="cell-mono text-xs">
+    {%- for k, v in a.arguments.items() -%}
+      {{ k }}={{ v }}{% if not loop.last %}, {% endif %}
+    {%- endfor -%}
+  </td>
+  <td class="mono muted text-xs">{{ a.user_id }}</td>
+  <td class="cell-mono muted text-xs" style="white-space:nowrap;">
+    {{ a.proposed_at.strftime("%Y-%m-%d %H:%M") }}
+  </td>
+  <td>
+    {% if a.status == "pending_approval" %}
+      <div class="btn-row">
+        <button class="btn btn-sm btn-primary"
+                hx-post="/approvals/{{ a.id }}/approve"
+                hx-target="#action-{{ a.id }}"
+                hx-swap="outerHTML swap:120ms settle:120ms"
+                hx-disabled-elt="this">Approve</button>
+        <button class="btn btn-sm btn-danger"
+                hx-post="/approvals/{{ a.id }}/reject"
+                hx-target="#action-{{ a.id }}"
+                hx-swap="outerHTML swap:120ms settle:120ms"
+                hx-disabled-elt="this">Reject</button>
+      </div>
+    {% elif a.status == "executed" %}
+      <span class="badge badge-success">Executed</span>
+    {% elif a.status == "pending_approval" %}
+      <span class="badge badge-warning">Pending</span>
+    {% else %}
+      <span class="badge badge-neutral">{{ a.status }}</span>
+    {% endif %}
+  </td>
+</tr>

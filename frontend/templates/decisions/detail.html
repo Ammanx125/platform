@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Decision · {{ app_name }}{% endblock %}
+{% block main %}
+
+<div class="page-header">
+  <div class="row-between">
+    <div>
+      <h1 class="page-title">{{ decision.query|truncate(100) }}</h1>
+      <p class="page-subtitle">
+        <span class="mono text-xs">{{ decision.id }}</span>
+        · {{ decision.created_at.strftime("%Y-%m-%d %H:%M") }}
+        {% if decision.duration_ms %}· {{ decision.duration_ms }} ms{% endif %}
+      </p>
+    </div>
+  </div>
+</div>
+
+{% if decision.error %}
+  <div class="alert alert-danger mb-6">{{ decision.error }}</div>
+{% endif %}
+
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-header"><h2 class="card-title">Answer</h2></div>
+    <div class="card-body">
+      <p style="margin-top:0;">
+        {{ decision.llm_summary or "No summary was produced." }}
+      </p>
+      {% if decision.validated_claims %}
+        <div class="evidence-block mt-4">
+          <div class="evidence-label">Claims</div>
+          {% for c in decision.validated_claims %}
+            <div class="evidence-item">
+              <div>{{ c.text }}</div>
+              <div class="evidence-id">
+                {% for eid in c.evidence_ids %}[{{ eid }}] {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if decision.dropped_claims %}
+        <div class="evidence-block mt-4">
+          <div class="evidence-label">Claims that could not be supported</div>
+          {% for c in decision.dropped_claims %}
+            <div class="evidence-item">
+              <div class="muted">{{ c.text }}</div>
+              <div class="evidence-id">{{ c.reason }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><h2 class="card-title">Evidence</h2></div>
+    <div class="card-body">
+      {% if decision.evidence and (decision.evidence.kpis or decision.evidence.anomalies or decision.evidence.forecasts or decision.evidence.workflows or decision.evidence.chunks) %}
+        {% if decision.evidence.kpis %}
+          <div class="evidence-block">
+            <div class="evidence-label">KPIs</div>
+            {% for k in decision.evidence.kpis %}
+              <div class="evidence-item">
+                <div class="row-between">
+                  <div>{{ k.display_name }}</div>
+                  <div class="mono">
+                    {% if k.value is mapping %}
+                      {{ k.value|length }} groups
+                    {% elif k.value is not none %}
+                      {{ "%.2f"|format(k.value) if k.value is number else k.value }}
+                    {% else %}—{% endif %}
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if decision.evidence.anomalies %}
+          <div class="evidence-block">
+            <div class="evidence-label">Anomalies</div>
+            {% for a in decision.evidence.anomalies %}
+              <div class="evidence-item">
+                <div class="row-between">
+                  <div>{{ a.detector_key }}{% if a.group_label %} · {{ a.group_label }}{% endif %}</div>
+                  <div class="mono">{{ "%.4g"|format(a.value) }}</div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if decision.evidence.forecasts %}
+          <div class="evidence-block">
+            <div class="evidence-label">Forecasts</div>
+            {% for f in decision.evidence.forecasts %}
+              <div class="evidence-item">
+                {{ f.value_concept }}
+                <span class="muted text-xs">({{ f.model_used }}, {{ f.reliability }})</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if decision.evidence.workflows %}
+          <div class="evidence-block">
+            <div class="evidence-label">Workflows</div>
+            {% for w in decision.evidence.workflows %}
+              <div class="evidence-item">
+                {{ w.workflow_key }}
+                <span class="badge badge-neutral">{{ w.status }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if decision.evidence.chunks %}
+          <div class="evidence-block">
+            <div class="evidence-label">Retrieved content</div>
+            {% for c in decision.evidence.chunks %}
+              <div class="evidence-item">
+                <div class="evidence-id">[{{ c.id }}]</div>
+                <div class="evidence-text">{{ c.content[:300] if c.content else "" }}</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="empty">No evidence was gathered for this decision.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if decision.llm_tool_calls %}
+  <section class="card mt-6">
+    <div class="card-header"><h2 class="card-title">Proposed actions</h2></div>
+    <div class="card-body flush">
+      <table class="table">
+        <thead>
+          <tr><th>Tool</th><th>Rationale</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+        {% for t in decision.llm_tool_calls %}
+          <tr>
+            <td class="mono text-xs">{{ t.name }}</td>
+            <td class="muted text-xs">{{ t.rationale or "—" }}</td>
+            <td>
+              {% if t.status == "executed" %}<span class="badge badge-success">{{ t.status }}</span>
+              {% elif t.status == "pending_approval" %}<span class="badge badge-warning">{{ t.status }}</span>
+              {% elif t.status == "rejected" or t.status == "failed" %}<span class="badge badge-danger">{{ t.status }}</span>
+              {% else %}<span class="badge badge-neutral">{{ t.status }}</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endif %}
+
+{% endblock %}

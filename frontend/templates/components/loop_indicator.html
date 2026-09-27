@@ -1,0 +1,13 @@
+<div class="loop" aria-label="Data to Understanding to Decision to Action">
+  {% set stages = [("data", "Data"), ("understanding", "Understanding"), ("decision", "Decision"), ("action", "Action")] %}
+  {% set order = {"data": 0, "understanding": 1, "decision": 2, "action": 3} %}
+  {% set current = order.get(loop_stage, 2) %}
+  {% for key, label in stages %}
+    <span class="loop-step"
+          data-active="{{ 'true' if loop.index0 == current else 'false' }}"
+          data-done="{{ 'true' if loop.index0 < current else 'false' }}">
+      {{ label }}
+    </span>
+    {% if not loop.last %}<span class="loop-arrow" aria-hidden="true">→</span>{% endif %}
+  {% endfor %}
+</div>

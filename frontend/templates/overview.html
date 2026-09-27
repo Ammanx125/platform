@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Overview · {{ app_name }}{% endblock %}
+{% block main %}
+
+<div class="page-header">
+  <h1 class="page-title">Overview</h1>
+  <p class="page-subtitle">A current read on your data, decisions, and pending actions.</p>
+</div>
+
+{# --- Ask Sansa --- #}
+<section class="card mb-6">
+  <div class="card-body">
+    <form hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML"
+          hx-indicator="#ask-spinner" class="row" style="gap:12px;">
+      <input class="input" type="text" name="query"
+             placeholder="Ask a management question, e.g. why did procurement cost increase this quarter?"
+             required style="flex:1;">
+      <button type="submit" class="btn btn-primary">Ask</button>
+      <span id="ask-spinner" class="htmx-indicator muted text-sm">Thinking…</span>
+    </form>
+    <div id="ask-result" class="mt-4"></div>
+  </div>
+</section>
+
+<div class="grid grid-2">
+  {# --- KPIs --- #}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Key metrics</h2>
+      <a href="/decisions" class="text-sm">All decisions</a>
+    </div>
+    <div class="card-body flush">
+      {% if kpis %}
+        <table class="table">
+          <tbody>
+          {% for k in kpis %}
+            <tr>
+              <td>{{ k.display_name }}</td>
+              <td class="cell-num">
+                {% if k.value is mapping %}
+                  <span class="muted text-sm">{{ k.value|length }} groups</span>
+                {% elif k.value is not none %}
+                  {{ "%.2f"|format(k.value) if k.value is number else k.value }}
+                  {% if k.unit %}<span class="muted text-xs">{{ k.unit }}</span>{% endif %}
+                {% else %}
+                  <span class="faint">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No KPIs computed yet.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  {# --- Pending approvals --- #}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Pending approvals</h2>
+      <a href="/approvals" class="text-sm">All approvals</a>
+    </div>
+    <div class="card-body flush">
+      {% if pending_actions %}
+        <table class="table">
+          <tbody>
+          {% for a in pending_actions %}
+            <tr>
+              <td>
+                <div>{{ a.tool_name }}</div>
+                <div class="muted text-xs">{{ a.rationale or "—" }}</div>
+              </td>
+              <td class="cell-mono muted text-xs" style="white-space:nowrap;">
+                {{ a.proposed_at.strftime("%Y-%m-%d %H:%M") if a.proposed_at else "" }}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">Nothing waiting on you.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  {# --- Recent anomalies --- #}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recent anomalies</h2>
+    </div>
+    <div class="card-body flush">
+      {% if recent_anomalies %}
+        <table class="table">
+          <tbody>
+          {% for a in recent_anomalies %}
+            <tr>
+              <td>
+                <div>{{ a.detector_key }}</div>
+                <div class="muted text-xs">
+                  {{ a.group_label or "—" }} · {{ "%.4g"|format(a.value) }}
+                </div>
+              </td>
+              <td class="cell-mono muted text-xs" style="white-space:nowrap;">
+                {{ a.point_timestamp.strftime("%Y-%m-%d") }}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No anomalies detected.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  {# --- Recent decisions --- #}
+  <section class="card">
+    <div class="card-header">
+      <h2 class="card-title">Recent decisions</h2>
+    </div>
+    <div class="card-body flush">
+      {% if recent_decisions %}
+        <table class="table">
+          <tbody>
+          {% for d in recent_decisions %}
+            <tr>
+              <td>
+                <a href="/decisions/{{ d.id }}">{{ d.query|truncate(72) }}</a>
+              </td>
+              <td class="cell-mono muted text-xs" style="white-space:nowrap;">
+                {{ d.created_at.strftime("%Y-%m-%d %H:%M") }}
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="empty">No decisions yet. Ask Sansa a question above.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% endblock %}

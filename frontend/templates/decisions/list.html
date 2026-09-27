@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Decisions · {{ app_name }}{% endblock %}
+{% block main %}
+
+<div class="page-header">
+  <h1 class="page-title">Decisions</h1>
+  <p class="page-subtitle">Every question you have put to Sansa, with its evidence and outcome.</p>
+</div>
+
+<section class="card">
+  <div class="card-body flush">
+    {% if decisions %}
+      <table class="table">
+        <thead>
+          <tr><th>Query</th><th>Model</th><th>Duration</th><th>When</th></tr>
+        </thead>
+        <tbody>
+        {% for d in decisions %}
+          <tr>
+            <td><a href="/decisions/{{ d.id }}">{{ d.query|truncate(90) }}</a></td>
+            <td class="muted text-xs">{{ d.llm_model or "—" }}</td>
+            <td class="cell-mono text-xs">{{ d.duration_ms }} ms</td>
+            <td class="cell-mono muted text-xs">{{ d.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">No decisions yet.</div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

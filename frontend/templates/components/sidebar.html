@@ -1,0 +1,8 @@
+<nav class="nav">
+  <div class="nav-group">
+    <div class="nav-group-label">Workspace</div>
+    <a class="nav-item" href="/" {% if active_nav == "overview" %}aria-current="page"{% endif %}>Overview</a>
+    <a class="nav-item" href="/decisions" {% if active_nav == "decisions" %}aria-current="page"{% endif %}>Decisions</a>
+    <a class="nav-item" href="/approvals" {% if active_nav == "approvals" %}aria-current="page"{% endif %}>Approvals</a>
+  </div>
+</nav>

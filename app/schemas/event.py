@@ -12,6 +12,8 @@ class EventRead(BaseModel):
     id: uuid.UUID
     event_type: str
     source_id: uuid.UUID | None
+    user_id: uuid.UUID | None
+    actor_kind: str
     occurred_at: datetime
     received_at: datetime
     dedup_key: str | None

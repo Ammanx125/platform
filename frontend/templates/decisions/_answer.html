@@ -1,0 +1,50 @@
+{% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+{% else %}
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Answer</h3>
+      <a href="/decisions/{{ decision_id }}" class="text-sm">Full decision →</a>
+    </div>
+    <div class="card-body">
+      {% if summary %}
+        <p style="margin-top:0;">{{ summary }}</p>
+      {% else %}
+        <p class="muted" style="margin-top:0;">No summary was produced.</p>
+      {% endif %}
+
+      {% if validated_claims %}
+        <div class="evidence-block">
+          <div class="evidence-label">Claims</div>
+          {% for c in validated_claims %}
+            <div class="evidence-item">
+              <div>{{ c.text }}</div>
+              <div class="evidence-id">
+                {% for eid in c.evidence_ids %}[{{ eid }}] {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if tool_calls %}
+        <div class="evidence-block">
+          <div class="evidence-label">Proposed actions</div>
+          <table class="table">
+            <tbody>
+            {% for t in tool_calls %}
+              <tr>
+                <td>
+                  <div>{{ t.name }}</div>
+                  {% if t.rationale %}<div class="muted text-xs">{{ t.rationale }}</div>{% endif %}
+                </td>
+                <td><span class="badge badge-info">{{ t.status }}</span></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}

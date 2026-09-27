@@ -75,6 +75,11 @@ class Event(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         index=True,
     )
 
+    # Distinguish human, platform, and external-service actions without a join.
+    actor_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="system", index=True
+    )
+
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
