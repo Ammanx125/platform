@@ -44,6 +44,11 @@ app.mount(
     StaticFiles(directory=str(_FRONTEND_DIR / "static")),
     name="static",
 )
+app.mount(
+    "/assets",
+    StaticFiles(directory=str(_FRONTEND_DIR / "assets")),
+    name="assets",
+)
 
 app.include_router(api_router)
 app.include_router(web_router)

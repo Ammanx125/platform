@@ -2,37 +2,31 @@
 {% block title %}Workflows · {{ app_name }}{% endblock %}
 {% block main %}
 
-<div class="page-header">
-  <div class="row-between">
-    <div>
-      <h1 class="page-title">Workflows</h1>
-      <p class="page-subtitle">Registered workflow definitions.</p>
-    </div>
-    <a href="/workflows/instances" class="btn">View instances</a>
-  </div>
-</div>
+<header class="page-header">
+  <div class="eyebrow">Operations</div>
+  <h1 class="page-title">Workflows</h1>
+  <p class="page-subtitle">Registered automation and decision flows.</p>
+</header>
 
-<div class="grid grid-2">
-  {% for w in workflows %}
-    <section class="card">
-      <div class="card-header">
-        <h2 class="card-title">{{ w.display_name }}</h2>
-        <span class="badge badge-neutral">{{ w.domain }}</span>
-      </div>
-      <div class="card-body">
-        <p class="text-sm muted" style="margin-top:0;">{{ w.description }}</p>
-        <div class="text-xs muted mt-4">
-          <span class="mono">{{ w.key }}</span> ·
-          {{ w.steps|length }} step{{ "s" if w.steps|length != 1 else "" }} ·
-          {{ w.requirements|length }} requirement{{ "s" if w.requirements|length != 1 else "" }}
+<section class="section">
+  <div class="row-list">
+    {% for w in workflows %}
+      <div class="row" style="grid-template-columns: 1fr auto;">
+        <div>
+          <div class="row-primary">{{ w.display_name }}</div>
+          <div class="row-secondary mt-2">{{ w.description }}</div>
+          <div class="row-secondary mt-2">
+            <span class="mono text-xs">{{ w.key }}</span>
+            · {{ w.steps|length }} step{{ "s" if w.steps|length != 1 else "" }}
+            · {{ w.requirements|length }} requirement{{ "s" if w.requirements|length != 1 else "" }}
+          </div>
         </div>
-        <div class="mt-4">
-          <a class="btn btn-sm"
-             href="/workflows/instances?workflow_key={{ w.key }}">Instances →</a>
+        <div class="row-meta">
+          <a href="/workflows/instances?workflow_key={{ w.key }}">View instances →</a>
         </div>
       </div>
-    </section>
-  {% endfor %}
-</div>
+    {% endfor %}
+  </div>
+</section>
 
 {% endblock %}

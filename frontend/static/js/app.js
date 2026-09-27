@@ -11,6 +11,23 @@
 (function () {
   "use strict";
 
+  var themeToggle = document.querySelector(".theme-toggle");
+  if (themeToggle) {
+    var isDark = document.documentElement.dataset.theme === "dark";
+    themeToggle.setAttribute("aria-checked", String(isDark));
+    themeToggle.setAttribute("aria-label", isDark ? "Enable light mode" : "Enable dark mode");
+
+    themeToggle.addEventListener("click", function () {
+      isDark = !isDark;
+      document.documentElement.dataset.theme = isDark ? "dark" : "light";
+      themeToggle.setAttribute("aria-checked", String(isDark));
+      themeToggle.setAttribute("aria-label", isDark ? "Enable light mode" : "Enable dark mode");
+      try {
+        localStorage.setItem("sansa-theme", isDark ? "dark" : "light");
+      } catch (_) {}
+    });
+  }
+
   function readCookie(name) {
     var prefix = name + "=";
     var parts = document.cookie ? document.cookie.split("; ") : [];

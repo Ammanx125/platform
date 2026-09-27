@@ -7,3 +7,9 @@
 
 from app.core.crypto import generate_key; print(generate_key())
 KDlg8feQ3YYVD_VqkWODytoIlFoWyv3CsI2XIMISw_Y=             # The result
+
+python -m scripts.create_admin `
+  --tenant-name "Sansa Demo" `
+  --tenant-slug "sansa-demo" `
+  --admin-email "admin@sansa.local" `
+  --admin-password "SansaDemo2026"

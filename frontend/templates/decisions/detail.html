@@ -2,135 +2,112 @@
 {% block title %}Decision · {{ app_name }}{% endblock %}
 {% block main %}
 
-<div class="page-header">
-  <h1 class="page-title">{{ decision.query|truncate(100) }}</h1>
+<header class="page-header">
+  <div class="caption mb-2">Decision</div>
+  <h1 class="page-title">{{ decision.query|truncate(140) }}</h1>
   <p class="page-subtitle">
     <span class="mono text-xs">{{ decision.id }}</span>
     · {{ decision.created_at.strftime("%Y-%m-%d %H:%M") }}
     {% if decision.duration_ms %}· {{ decision.duration_ms }} ms{% endif %}
     {% if decision.llm_model %}· {{ decision.llm_model }}{% endif %}
   </p>
-</div>
+</header>
 
 {% if decision.error %}
   <div class="alert alert-danger mb-6">{{ decision.error }}</div>
 {% endif %}
 
-<div class="grid grid-2">
-  <section class="card">
-    <div class="card-header"><h2 class="card-title">Answer</h2></div>
-    <div class="card-body">
-      <p style="margin-top:0;">
-        {{ decision.llm_summary or "No summary was produced." }}
-      </p>
+<article class="brief">
 
-      {% if decision.validated_claims %}
-        <div class="decision-section">
-          <div class="decision-section-label">Claims</div>
-          {% for c in decision.validated_claims %}
-            <div class="evidence-item">
-              <div>{{ c.text }}</div>
-              <div class="evidence-id">
-                {% for eid in c.evidence_ids %}[{{ eid }}] {% endfor %}
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-      {% endif %}
-
-      {% if decision.dropped_claims %}
-        <div class="decision-section">
-          <details>
-            <summary class="decision-section-label" style="margin-bottom:0;">
-              Unsupported claims ({{ decision.dropped_claims|length }})
-            </summary>
-            <div style="margin-top:12px;">
-              {% for c in decision.dropped_claims %}
-                <div class="evidence-item">
-                  <div class="muted">{{ c.text }}</div>
-                  <div class="evidence-id">{{ c.reason }}</div>
-                </div>
-              {% endfor %}
-            </div>
-          </details>
-        </div>
-      {% endif %}
-
-      {% if decision.plan %}
-        <div class="decision-section">
-          <details>
-            <summary class="decision-section-label" style="margin-bottom:0;">
-              Execution plan
-            </summary>
-            <table class="table" style="margin-top:12px;">
-              <thead>
-                <tr><th>Capability</th><th>Reason</th></tr>
-              </thead>
-              <tbody>
-              {% for s in decision.plan %}
-                <tr>
-                  <td class="mono text-xs">{{ s.capability }}</td>
-                  <td class="muted text-xs">{{ s.reason }}</td>
-                </tr>
-              {% endfor %}
-              </tbody>
-            </table>
-          </details>
-        </div>
-      {% endif %}
-    </div>
+  {# --- Question --- #}
+  <section class="brief-section">
+    <div class="brief-section-label">Question</div>
+    <div>{{ decision.query }}</div>
   </section>
 
-  <section class="card">
-    <div class="card-header"><h2 class="card-title">Evidence</h2></div>
-    <div class="card-body">
-      {% if decision.evidence and (decision.evidence.kpis or decision.evidence.anomalies or decision.evidence.forecasts or decision.evidence.workflows or decision.evidence.chunks) %}
-        {% if decision.evidence.kpis %}
-          <div class="evidence-block">
-            <div class="evidence-label">KPIs</div>
+  {# --- Conclusion --- #}
+  <section class="brief-section">
+    <div class="brief-section-label">Conclusion</div>
+    <div class="brief-conclusion">{{ decision.llm_summary or "No conclusion was produced." }}</div>
+  </section>
+
+  {# --- Validated claims --- #}
+  {% if decision.validated_claims %}
+    <section class="brief-section">
+      <div class="brief-section-label">Why this is believed</div>
+      <div class="evidence-list">
+        {% for c in decision.validated_claims %}
+          <div class="claim">
+            <div class="claim-text">{{ c.text }}</div>
+            <div class="claim-source">
+              {% for eid in c.evidence_ids %}[{{ eid }}]{% if not loop.last %} {% endif %}{% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# --- Evidence --- #}
+  {% if decision.evidence and (decision.evidence.kpis or decision.evidence.anomalies or decision.evidence.forecasts or decision.evidence.workflows or decision.evidence.chunks) %}
+    <section class="brief-section">
+      <div class="brief-section-label">Supporting evidence</div>
+
+      {% if decision.evidence.kpis %}
+        <div class="mb-4">
+          <div class="caption mb-2">KPIs</div>
+          <div class="evidence-list">
             {% for k in decision.evidence.kpis %}
               <div class="evidence-item">
-                <div class="row-between">
-                  <div>{{ k.display_name }}</div>
-                  <div class="mono">
-                    {% if k.value is mapping %}
-                      {{ k.value|length }} groups
-                    {% elif k.value is not none %}
-                      {{ "%.2f"|format(k.value) if k.value is number else k.value }}
-                    {% else %}—{% endif %}
-                  </div>
+                <div>{{ k.display_name }}</div>
+                <div class="mono">
+                  {% if k.value is mapping %}
+                    {{ k.value|length }} groups
+                  {% elif k.value is not none %}
+                    {{ "%.2f"|format(k.value) if k.value is number else k.value }}
+                  {% else %}—{% endif %}
                 </div>
               </div>
             {% endfor %}
           </div>
-        {% endif %}
-        {% if decision.evidence.anomalies %}
-          <div class="evidence-block">
-            <div class="evidence-label">Anomalies</div>
+        </div>
+      {% endif %}
+
+      {% if decision.evidence.anomalies %}
+        <div class="mb-4">
+          <div class="caption mb-2">Anomalies</div>
+          <div class="evidence-list">
             {% for a in decision.evidence.anomalies %}
               <div class="evidence-item">
-                <div class="row-between">
-                  <div>{{ a.detector_key }}{% if a.group_label %} · {{ a.group_label }}{% endif %}</div>
-                  <div class="mono">{{ "%.4g"|format(a.value) }}</div>
+                <div>
+                  {{ a.detector_key }}
+                  {% if a.group_label %}<span class="muted"> · {{ a.group_label }}</span>{% endif %}
                 </div>
+                <div class="mono">{{ "%.4g"|format(a.value) }}</div>
               </div>
             {% endfor %}
           </div>
-        {% endif %}
-        {% if decision.evidence.forecasts %}
-          <div class="evidence-block">
-            <div class="evidence-label">Forecasts</div>
+        </div>
+      {% endif %}
+
+      {% if decision.evidence.forecasts %}
+        <div class="mb-4">
+          <div class="caption mb-2">Forecasts</div>
+          <div class="evidence-list">
             {% for f in decision.evidence.forecasts %}
               <div class="evidence-item">
-                {{ f.value_concept }}
-                <span class="muted text-xs">({{ f.model_used }}, {{ f.reliability }})</span>
+                <div>{{ f.value_concept }}</div>
+                <div class="muted text-xs">{{ f.model_used }} · {{ f.reliability }}</div>
               </div>
             {% endfor %}
           </div>
-        {% endif %}
-        {% if decision.evidence.workflows %}
-          <div class="evidence-block">
-            <div class="evidence-label">Workflows</div>
+        </div>
+      {% endif %}
+
+      {% if decision.evidence.workflows %}
+        <div class="mb-4">
+          <div class="caption mb-2">Workflows</div>
+          <div class="evidence-list">
             {% for w in decision.evidence.workflows %}
               <div class="evidence-item">
                 <a href="/workflows/instances/{{ w.instance_id }}" class="mono text-xs">{{ w.workflow_key }}</a>
@@ -138,55 +115,95 @@
               </div>
             {% endfor %}
           </div>
-        {% endif %}
-        {% if decision.evidence.chunks %}
-          <div class="evidence-block">
-            <div class="evidence-label">Retrieved content</div>
+        </div>
+      {% endif %}
+
+      {% if decision.evidence.chunks %}
+        <div>
+          <div class="caption mb-2">Retrieved content</div>
+          <div class="evidence-list">
             {% for c in decision.evidence.chunks %}
               <div class="evidence-item">
-                <div class="evidence-id">
-                  [{{ c.id }}]
-                  {% if c._injection_flags %}
-                    <span class="evidence-flag">flagged</span>
-                  {% endif %}
+                <div>
+                  <div class="evidence-id">
+                    [{{ c.id }}]
+                    {% if c._injection_flags %}<span class="evidence-flag">flagged</span>{% endif %}
+                  </div>
+                  <div class="mt-2">{{ c.content[:280] if c.content else "" }}</div>
                 </div>
-                <div class="evidence-text">{{ c.content[:300] if c.content else "" }}</div>
+                <div></div>
               </div>
             {% endfor %}
           </div>
-        {% endif %}
-      {% else %}
-        <div class="empty">No evidence was gathered for this decision.</div>
+        </div>
       {% endif %}
-    </div>
-  </section>
-</div>
+    </section>
+  {% endif %}
 
-{% if decision.llm_tool_calls %}
-  <section class="card mt-6">
-    <div class="card-header"><h2 class="card-title">Proposed actions</h2></div>
-    <div class="card-body flush">
-      <table class="table">
-        <thead>
-          <tr><th>Tool</th><th>Rationale</th><th>Status</th></tr>
-        </thead>
-        <tbody>
+  {# --- Unsupported claims (collapsed) --- #}
+  {% if decision.dropped_claims %}
+    <section class="brief-section">
+      <details>
+        <summary>
+          {{ decision.dropped_claims|length }} unsupported / unverified claim{{ "" if decision.dropped_claims|length == 1 else "s" }}
+        </summary>
+        <div class="evidence-list mt-4">
+          {% for c in decision.dropped_claims %}
+            <div class="claim">
+              <div class="claim-text muted">{{ c.text }}</div>
+              <div class="claim-source">{{ c.reason }}</div>
+            </div>
+          {% endfor %}
+        </div>
+      </details>
+    </section>
+  {% endif %}
+
+  {# --- Recommended action --- #}
+  {% if decision.llm_tool_calls %}
+    <section class="brief-section">
+      <div class="brief-section-label">Recommended action</div>
+      <div class="evidence-list">
         {% for t in decision.llm_tool_calls %}
-          <tr>
-            <td class="mono text-xs">{{ t.name }}</td>
-            <td class="muted text-xs">{{ t.rationale or "—" }}</td>
-            <td>
+          <div class="evidence-item">
+            <div>
+              <div>{{ t.name }}</div>
+              {% if t.rationale %}<div class="row-secondary">{{ t.rationale }}</div>{% endif %}
+            </div>
+            <div>
               {% if t.status == "executed" %}<span class="badge badge-success">{{ t.status }}</span>
-              {% elif t.status == "pending_approval" %}<span class="badge badge-warning">{{ t.status }}</span>
-              {% elif t.status == "rejected" or t.status == "failed" %}<span class="badge badge-danger">{{ t.status }}</span>
+              {% elif t.status == "pending_approval" %}<span class="badge badge-warning">awaiting approval</span>
+              {% elif t.status in ("rejected", "failed") %}<span class="badge badge-danger">{{ t.status }}</span>
               {% else %}<span class="badge badge-neutral">{{ t.status }}</span>{% endif %}
-            </td>
-          </tr>
+            </div>
+          </div>
         {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
-{% endif %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# --- Execution plan (collapsed, technical) --- #}
+  {% if decision.plan %}
+    <section class="brief-section">
+      <details>
+        <summary>Execution plan</summary>
+        <table class="table mt-4">
+          <thead>
+            <tr><th>Capability</th><th>Reason</th></tr>
+          </thead>
+          <tbody>
+          {% for s in decision.plan %}
+            <tr>
+              <td class="mono text-xs">{{ s.capability }}</td>
+              <td class="muted text-xs">{{ s.reason }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    </section>
+  {% endif %}
+
+</article>
 
 {% endblock %}

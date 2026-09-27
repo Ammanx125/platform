@@ -2,37 +2,29 @@
 {% block title %}Workflow instances · {{ app_name }}{% endblock %}
 {% block main %}
 
-<div class="page-header">
-  <div class="row-between">
+<header class="page-header">
+  <div class="flex-between">
     <div>
       <h1 class="page-title">Workflow instances</h1>
       <p class="page-subtitle">
-        {% if current_workflow_key %}
-          Filtered to <span class="mono">{{ current_workflow_key }}</span>
-        {% else %}
-          Every workflow run, most recent first.
-        {% endif %}
+        {% if current_workflow_key %}<span class="mono">{{ current_workflow_key }}</span>{% else %}Every workflow run, most recent first.{% endif %}
       </p>
     </div>
     <a href="/workflows" class="btn">Back to workflows</a>
   </div>
-</div>
+</header>
 
-<section class="card">
-  <div class="card-body flush">
+<section class="section">
+  <div class="table-wrap">
     {% if instances %}
       <table class="table">
         <thead>
-          <tr>
-            <th>Workflow</th><th>Status</th><th>Current step</th><th>Started</th><th>Duration</th>
-          </tr>
+          <tr><th>Workflow</th><th>Status</th><th>Current step</th><th>Started</th><th class="cell-num">Duration</th></tr>
         </thead>
         <tbody>
         {% for i in instances %}
           <tr>
-            <td>
-              <a href="/workflows/instances/{{ i.id }}" class="mono text-xs">{{ i.workflow_key }}</a>
-            </td>
+            <td><a href="/workflows/instances/{{ i.id }}" class="mono text-xs">{{ i.workflow_key }}</a></td>
             <td>
               {% if i.status == "completed" %}<span class="badge badge-success">{{ i.status }}</span>
               {% elif i.status in ("failed", "rejected") %}<span class="badge badge-danger">{{ i.status }}</span>
@@ -41,16 +33,14 @@
               {% else %}<span class="badge badge-neutral">{{ i.status }}</span>{% endif %}
             </td>
             <td class="mono text-xs">{{ i.current_step or "—" }}</td>
-            <td class="cell-mono muted text-xs">
-              {{ i.started_at.strftime("%Y-%m-%d %H:%M") if i.started_at else "—" }}
-            </td>
+            <td class="cell-mono muted text-xs">{{ i.started_at.strftime("%Y-%m-%d %H:%M") if i.started_at else "—" }}</td>
             <td class="cell-num">{{ i.duration_ms }} ms</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <div class="empty">No workflow instances yet.</div>
+      <div class="empty"><div class="empty-title">No workflow instances yet</div></div>
     {% endif %}
   </div>
 </section>

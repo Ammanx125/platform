@@ -1,24 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Data sources · {{ app_name }}{% endblock %}
+{% block title %}Data · {{ app_name }}{% endblock %}
 {% block main %}
 
-<div class="page-header">
+<header class="page-header">
   <h1 class="page-title">Data sources</h1>
   <p class="page-subtitle">Every source Sansa has ingested or is connected to.</p>
-</div>
+</header>
 
-<section class="card">
-  <div class="card-body flush">
+<section class="section">
+  <div class="table-wrap">
     {% if sources %}
       <table class="table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Latest job</th>
-            <th>Total</th>
-            <th>Failed</th>
-            <th>Created</th>
+            <th>Name</th><th>Type</th><th>Latest job</th><th class="cell-num">Total</th><th class="cell-num">Failed</th><th>Created</th>
           </tr>
         </thead>
         <tbody>
@@ -32,17 +27,20 @@
               {% elif c.latest_status == "failed" %}<span class="badge badge-danger">{{ c.latest_status }}</span>
               {% elif c.latest_status == "running" %}<span class="badge badge-info">{{ c.latest_status }}</span>
               {% elif c.latest_status == "pending" %}<span class="badge badge-warning">{{ c.latest_status }}</span>
-              {% else %}<span class="muted text-xs">{{ c.latest_status or "—" }}</span>{% endif %}
+              {% else %}<span class="faint">—</span>{% endif %}
             </td>
             <td class="cell-num">{{ c.total or 0 }}</td>
             <td class="cell-num">{{ c.failed or 0 }}</td>
-            <td class="cell-mono muted text-xs">{{ s.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+            <td class="cell-mono muted text-xs">{{ s.created_at.strftime("%Y-%m-%d") }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <div class="empty">No data sources yet. Register one through the API to get started.</div>
+      <div class="empty">
+        <div class="empty-title">No data sources</div>
+        <div class="empty-detail">Register a source through the API to begin ingesting data.</div>
+      </div>
     {% endif %}
   </div>
 </section>

@@ -4,32 +4,71 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sign in · {{ app_name }}</title>
+  <script>
+    try {
+      if (localStorage.getItem("sansa-theme") === "dark") {
+        document.documentElement.dataset.theme = "dark";
+      }
+    } catch (_) {}
+  </script>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/app.js" defer></script>
 </head>
-<body>
+<body class="login-page">
   <div class="login-wrap">
-    <div class="login-card">
-      <div class="login-brand">
-        <span class="brand-mark" aria-hidden="true"></span>
+    <header class="login-header">
+      <a class="login-brand" href="/login" aria-label="{{ app_name }} sign in">
+        <img src="/assets/logo.png" alt="">
         <span>{{ app_name }}</span>
-      </div>
+      </a>
+      <button class="theme-toggle" type="button" role="switch" aria-checked="false" aria-label="Enable dark mode">
+        <span class="theme-toggle-track" aria-hidden="true"><span></span></span>
+        <span>Dark mode</span>
+      </button>
+    </header>
 
-      {% if error %}
-        <div class="alert alert-danger mb-4">{{ error }}</div>
-      {% endif %}
+    <main class="login-shell">
+      <section class="login-visual" aria-label="{{ app_name }}">
+        <video class="login-video" autoplay muted loop playsinline preload="metadata" aria-hidden="true">
+          <source src="/assets/animation_vid.mp4" type="video/mp4">
+        </video>
+        <div class="login-visual-shade"></div>
+        <div class="login-visual-content">
+          <img src="/assets/logo.png" alt="{{ app_name }} logo">
+          <p class="login-visual-label">Business intelligence, in motion</p>
+          <h2>Where knowledge<br>becomes action.</h2>
+        </div>
+        <span class="login-visual-index" aria-hidden="true">SANSA / 01</span>
+      </section>
 
-      <form method="post" action="/login">
-        <div class="field">
-          <label class="field-label" for="email">Email</label>
-          <input class="input" type="email" id="email" name="email" required autofocus>
+      <section class="login-form-panel" aria-labelledby="login-title">
+        <div class="login-form-content">
+          <p class="login-eyebrow">Your workspace</p>
+          <h1 id="login-title" class="login-title">Welcome back</h1>
+          <p class="login-subtitle">Sign in to continue to {{ app_name }}.</p>
+
+          {% if error %}
+            <div class="login-error" role="alert">{{ error }}</div>
+          {% endif %}
+
+          <form method="post" action="/login" class="login-form">
+            <div class="field">
+              <label class="field-label" for="email">Email address</label>
+              <input class="input" type="email" id="email" name="email" autocomplete="username" required autofocus>
+            </div>
+            <div class="field">
+              <label class="field-label" for="password">Password</label>
+              <input class="input" type="password" id="password" name="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="btn btn-primary login-submit">
+              <span>Sign in</span>
+              <span class="login-submit-arrow" aria-hidden="true">&#8594;</span>
+            </button>
+          </form>
         </div>
-        <div class="field">
-          <label class="field-label" for="password">Password</label>
-          <input class="input" type="password" id="password" name="password" required>
-        </div>
-        <button type="submit" class="btn btn-primary" style="width:100%;">Sign in</button>
-      </form>
-    </div>
+        <p class="login-footer">Private workspace <span aria-hidden="true">&middot;</span> Secure access</p>
+      </section>
+    </main>
   </div>
 </body>
 </html>

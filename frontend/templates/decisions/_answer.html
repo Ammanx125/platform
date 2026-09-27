@@ -1,50 +1,65 @@
 {% if error %}
   <div class="alert alert-danger">{{ error }}</div>
 {% else %}
-  <div class="card">
-    <div class="card-header">
-      <h3 class="card-title">Answer</h3>
-      <a href="/decisions/{{ decision_id }}" class="text-sm">Full decision →</a>
-    </div>
-    <div class="card-body">
-      {% if summary %}
-        <p style="margin-top:0;">{{ summary }}</p>
-      {% else %}
-        <p class="muted" style="margin-top:0;">No summary was produced.</p>
-      {% endif %}
+  <article class="brief">
+    <header class="brief-header">
+      <span class="brief-question">Decision brief</span>
+      <a href="/decisions/{{ decision_id }}" class="brief-time">Open decision →</a>
+    </header>
 
-      {% if validated_claims %}
-        <div class="evidence-block">
-          <div class="evidence-label">Claims</div>
+    {% if summary %}
+      <section class="brief-section">
+        <div class="brief-section-label">Answer</div>
+        <div class="brief-conclusion">{{ summary }}</div>
+      </section>
+    {% else %}
+      <section class="brief-section">
+        <div class="brief-section-label">Answer</div>
+        <div class="muted">No conclusion was produced for this question.</div>
+      </section>
+    {% endif %}
+
+    {% if validated_claims %}
+      <section class="brief-section">
+        <div class="brief-section-label">Why this is believed</div>
+        <div class="evidence-list">
           {% for c in validated_claims %}
-            <div class="evidence-item">
-              <div>{{ c.text }}</div>
-              <div class="evidence-id">
-                {% for eid in c.evidence_ids %}[{{ eid }}] {% endfor %}
+            <div class="claim">
+              <div class="claim-text">{{ c.text }}</div>
+              <div class="claim-source">
+                {% for eid in c.evidence_ids %}[{{ eid }}]{% if not loop.last %} {% endif %}{% endfor %}
               </div>
             </div>
           {% endfor %}
         </div>
-      {% endif %}
+      </section>
+    {% endif %}
 
-      {% if tool_calls %}
-        <div class="evidence-block">
-          <div class="evidence-label">Proposed actions</div>
-          <table class="table">
-            <tbody>
-            {% for t in tool_calls %}
-              <tr>
-                <td>
-                  <div>{{ t.name }}</div>
-                  {% if t.rationale %}<div class="muted text-xs">{{ t.rationale }}</div>{% endif %}
-                </td>
-                <td><span class="badge badge-info">{{ t.status }}</span></td>
-              </tr>
-            {% endfor %}
-            </tbody>
-          </table>
+    {% if tool_calls %}
+      <section class="brief-section">
+        <div class="brief-section-label">Recommended action</div>
+        <div class="evidence-list">
+          {% for t in tool_calls %}
+            <div class="evidence-item">
+              <div>
+                <div>{{ t.name }}</div>
+                {% if t.rationale %}<div class="row-secondary">{{ t.rationale }}</div>{% endif %}
+              </div>
+              <div>
+                {% if t.status == "executed" %}<span class="badge badge-success">{{ t.status }}</span>
+                {% elif t.status == "pending_approval" %}<span class="badge badge-warning">awaiting approval</span>
+                {% elif t.status in ("rejected", "failed") %}<span class="badge badge-danger">{{ t.status }}</span>
+                {% else %}<span class="badge badge-neutral">{{ t.status }}</span>{% endif %}
+              </div>
+            </div>
+          {% endfor %}
         </div>
-      {% endif %}
-    </div>
-  </div>
+      </section>
+    {% endif %}
+
+    <footer class="brief-footer">
+      <span class="muted">Evidence and calculations are recorded with the decision.</span>
+      <a href="/decisions/{{ decision_id }}">View full decision →</a>
+    </footer>
+  </article>
 {% endif %}
