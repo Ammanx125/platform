@@ -87,10 +87,11 @@ def _extension_of(path: str) -> str:
 
 
 async def classify_observations(
-    db: AsyncSession, *, source_id: uuid.UUID
+    db: AsyncSession, *, tenant_id: uuid.UUID, source_id: uuid.UUID
 ) -> Classification:
     """
     Load the latest observation per path for a source and classify them.
+    Scoped to `tenant_id`; passing a foreign `source_id` returns nothing.
 
     "Latest per path" means: if the same path appears with multiple hashes
     (changed over time), only the newest observation (by first_seen_at) is
@@ -100,8 +101,11 @@ async def classify_observations(
     rows = (
         await db.execute(
             select(FileObservation)
-            .where(FileObservation.source_id == source_id)
-            .where(FileObservation.status != "deleted")
+            .where(
+                FileObservation.source_id == source_id,
+                FileObservation.tenant_id == tenant_id,
+                FileObservation.status != "deleted",
+            )
             .order_by(FileObservation.first_seen_at.desc())
         )
     ).scalars().all()

@@ -1,9 +1,121 @@
 supplier,product,quantity,unit_price,order_date
-Acme Supplies,Steel Bolt M8,1000,0.42,2026-01-15
-Acme Supplies,Steel Nut M8,2000,0.18,2026-01-15
-Beacon Metals,Aluminium Sheet 2mm,50,18.75,2026-01-20
-Beacon Metals,Aluminium Sheet 3mm,30,26.40,2026-01-20
-Cobalt Parts,Copper Wire 1.5mm,500,1.10,2026-02-01
-Cobalt Parts,Copper Wire 2.5mm,300,1.85,2026-02-01
-Delta Industrial,Steel Bolt M10,800,0.55,2026-02-05
-Delta Industrial,Steel Nut M10,1500,0.22,2026-02-05
+Frontier Fasteners,Steel Nut M8,50,0.19,2026-08-02
+Beacon Metals,Aluminium Sheet 2mm,100,19.41,2026-05-17
+Acme Industrial,Rubber Gasket 75mm,800,2.99,2026-09-10
+Beacon Metals,Aluminium Sheet 3mm,50,26.72,2026-04-20
+Frontier Fasteners,Rubber Gasket 50mm,800,2.03,2026-05-06
+Cobalt Parts,Steel Bolt M8,150,0.44,2026-07-08
+Cobalt Parts,Aluminium Sheet 2mm,200,20.46,2026-07-09
+Acme Industrial,Steel Nut M8,800,0.17,2026-07-07
+Everest Materials,Copper Wire 1.5mm,50,1.15,2026-05-19
+Acme Industrial,Steel Bolt M10,100,0.56,2026-04-26
+Everest Materials,Copper Wire 2.5mm,200,1.93,2026-09-22
+Frontier Fasteners,Aluminium Sheet 3mm,300,28.96,2026-08-05
+Acme Industrial,Steel Bolt M10,300,0.54,2026-07-02
+Beacon Metals,Copper Wire 2.5mm,500,1.74,2026-07-27
+Frontier Fasteners,Stainless Washer M8,100,0.08,2026-08-21
+Everest Materials,Stainless Washer M10,200,0.11,2026-06-28
+Cobalt Parts,Stainless Washer M8,200,0.08,2026-09-19
+Beacon Metals,Steel Bolt M8,500,0.41,2026-09-17
+Beacon Metals,Rubber Gasket 75mm,500,3.11,2026-05-29
+Delta Supply Co,Stainless Washer M8,1000,0.07,2026-08-29
+Beacon Metals,Stainless Washer M10,300,0.13,2026-06-16
+Everest Materials,Steel Bolt M10,500,0.52,2026-08-29
+Everest Materials,Steel Nut M10,100,0.23,2026-09-05
+Beacon Metals,Stainless Washer M8,150,0.08,2026-06-17
+Everest Materials,Steel Nut M8,800,0.18,2026-06-06
+Everest Materials,Copper Wire 1.5mm,50,1.14,2026-09-04
+Frontier Fasteners,Rubber Gasket 50mm,300,2.27,2026-07-08
+Acme Industrial,Copper Wire 1.5mm,800,1.02,2026-10-03
+Frontier Fasteners,Stainless Washer M10,300,0.13,2026-08-19
+Everest Materials,Steel Nut M8,300,0.19,2026-05-27
+Everest Materials,Aluminium Sheet 3mm,150,25.73,2026-08-23
+Everest Materials,Rubber Gasket 50mm,50,2.19,2026-05-31
+Acme Industrial,Steel Nut M8,500,0.19,2026-07-17
+Beacon Metals,Steel Bolt M8,200,0.45,2026-09-13
+Acme Industrial,Stainless Washer M10,1000,0.13,2026-05-20
+Beacon Metals,Aluminium Sheet 2mm,1000,20.43,2026-08-22
+Cobalt Parts,Rubber Gasket 50mm,800,2.35,2026-05-18
+Frontier Fasteners,Stainless Washer M10,200,0.13,2026-06-23
+Frontier Fasteners,Stainless Washer M8,500,0.08,2026-05-24
+Delta Supply Co,Steel Nut M8,200,0.17,2026-07-09
+Acme Industrial,Rubber Gasket 75mm,200,16.5,2026-10-01
+Frontier Fasteners,Stainless Washer M8,50,0.08,2026-09-25
+Cobalt Parts,Steel Nut M8,200,0.17,2026-06-01
+Beacon Metals,Rubber Gasket 50mm,150,2.25,2026-05-10
+Everest Materials,Steel Nut M10,200,0.23,2026-06-21
+Beacon Metals,Steel Nut M8,100,0.19,2026-07-05
+Delta Supply Co,Steel Bolt M10,1000,0.59,2026-09-20
+Frontier Fasteners,Stainless Washer M8,100,0.07,2026-07-09
+Acme Industrial,Aluminium Sheet 3mm,200,24.76,2026-06-11
+Beacon Metals,Steel Bolt M10,150,0.53,2026-08-01
+Acme Industrial,Steel Nut M10,100,0.2,2026-05-18
+Acme Industrial,Steel Nut M8,200,0.17,2026-06-01
+Delta Supply Co,Aluminium Sheet 3mm,800,28.52,2026-08-22
+Delta Supply Co,Steel Bolt M8,800,0.4,2026-06-09
+Cobalt Parts,Steel Bolt M10,1000,0.51,2026-07-20
+Beacon Metals,Steel Bolt M8,50,0.44,2026-09-19
+Acme Industrial,Rubber Gasket 75mm,1000,3.3,2026-05-21
+Beacon Metals,Steel Bolt M8,100,0.45,2026-09-16
+Everest Materials,Steel Nut M8,200,0.18,2026-05-11
+Beacon Metals,Rubber Gasket 75mm,50,3.38,2026-06-18
+Frontier Fasteners,Rubber Gasket 75mm,500,3.59,2026-08-12
+Frontier Fasteners,Stainless Washer M10,500,0.11,2026-06-24
+Beacon Metals,Stainless Washer M8,300,0.08,2026-09-15
+Acme Industrial,Steel Nut M10,100,0.2,2026-08-10
+Everest Materials,Copper Wire 1.5mm,150,1.2,2026-09-16
+Beacon Metals,Copper Wire 2.5mm,300,1.72,2026-05-17
+Frontier Fasteners,Copper Wire 1.5mm,50,1.14,2026-05-15
+Cobalt Parts,Stainless Washer M8,100,0.09,2026-08-30
+Cobalt Parts,Steel Nut M8,100,0.19,2026-08-25
+Cobalt Parts,Copper Wire 1.5mm,200,1.15,2026-08-12
+Frontier Fasteners,Stainless Washer M8,300,0.08,2026-07-31
+Acme Industrial,Steel Nut M8,800,0.19,2026-09-22
+Acme Industrial,Copper Wire 2.5mm,150,1.9,2026-07-28
+Beacon Metals,Stainless Washer M10,1000,0.12,2026-06-16
+Everest Materials,Steel Bolt M8,100,0.38,2026-04-10
+Beacon Metals,Rubber Gasket 50mm,50,2.29,2026-05-07
+Everest Materials,Aluminium Sheet 2mm,800,17.35,2026-07-17
+Cobalt Parts,Steel Bolt M8,500,0.4,2026-08-01
+Frontier Fasteners,Steel Nut M8,500,0.19,2026-06-21
+Everest Materials,Stainless Washer M10,150,0.13,2026-08-04
+Beacon Metals,Aluminium Sheet 2mm,800,16.97,2026-07-10
+Delta Supply Co,Stainless Washer M8,200,0.08,2026-04-07
+Acme Industrial,Steel Bolt M10,50,0.59,2026-08-08
+Beacon Metals,Steel Nut M10,500,0.21,2026-08-06
+Beacon Metals,Steel Bolt M8,200,0.41,2026-07-24
+Acme Industrial,Copper Wire 1.5mm,500,1.13,2026-06-23
+Frontier Fasteners,Rubber Gasket 50mm,500,2.34,2026-09-04
+Cobalt Parts,Aluminium Sheet 2mm,300,17.02,2026-05-04
+Delta Supply Co,Copper Wire 2.5mm,500,1.83,2026-05-26
+Acme Industrial,Steel Bolt M10,200,0.52,2026-06-14
+Acme Industrial,Rubber Gasket 50mm,200,2.09,2026-09-16
+Frontier Fasteners,Copper Wire 2.5mm,500,1.91,2026-09-02
+Frontier Fasteners,Copper Wire 1.5mm,300,1.14,2026-07-12
+Delta Supply Co,Stainless Washer M10,300,0.12,2026-08-15
+Delta Supply Co,Stainless Washer M8,800,0.08,2026-08-20
+Everest Materials,Rubber Gasket 75mm,300,3.24,2026-10-03
+Cobalt Parts,Copper Wire 1.5mm,200,1.08,2026-05-08
+Everest Materials,Stainless Washer M8,500,0.08,2026-06-12
+Frontier Fasteners,Aluminium Sheet 3mm,1000,27.95,2026-08-21
+Frontier Fasteners,Steel Nut M8,300,0.18,2026-04-24
+Everest Materials,Copper Wire 2.5mm,100,1.97,2026-08-04
+Frontier Fasteners,Copper Wire 1.5mm,200,1.17,2026-08-27
+Acme Industrial,Steel Bolt M8,200,0.46,2026-04-30
+Acme Industrial,Steel Nut M10,800,0.24,2026-05-09
+Beacon Metals,Stainless Washer M10,800,0.12,2026-08-02
+Beacon Metals,Stainless Washer M8,50,0.09,2026-09-06
+Delta Supply Co,Aluminium Sheet 3mm,150,28.01,2026-04-08
+Everest Materials,Steel Nut M10,50,0.22,2026-09-02
+Delta Supply Co,Aluminium Sheet 2mm,1000,19.38,2026-05-13
+Everest Materials,Copper Wire 2.5mm,1000,1.89,2026-05-27
+Delta Supply Co,Rubber Gasket 50mm,1000,2.32,2026-06-04
+Delta Supply Co,Copper Wire 1.5mm,200,1.17,2026-07-25
+Everest Materials,Steel Nut M10,200,0.21,2026-09-14
+Frontier Fasteners,Copper Wire 1.5mm,200,1.05,2026-07-14
+Everest Materials,Steel Nut M8,150,0.17,2026-06-27
+Frontier Fasteners,Aluminium Sheet 2mm,200,17.12,2026-06-21
+Cobalt Parts,Rubber Gasket 50mm,1000,2.11,2026-08-12
+Delta Supply Co,Steel Bolt M10,50,0.59,2026-05-09
+Delta Supply Co,Steel Nut M10,50,0.24,2026-07-19
+Delta Supply Co,Steel Bolt M10,200,0.55,2026-07-26

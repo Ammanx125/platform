@@ -327,6 +327,8 @@ async def agent_upload_content(
         message=f"file delivered: {pending.path}",
     )
 
+    await db.commit()
+
     # If all pending uploads for this ingestion job are done, run the job.
     from app.services.agents.jobs import _maybe_trigger_ingestion
     await _maybe_trigger_ingestion(db, ingestion_job_id=ingestion_job.id)

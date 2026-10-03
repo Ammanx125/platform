@@ -4,6 +4,7 @@ import io
 import pytest
 from httpx import AsyncClient
 
+from app.db.models.dataset import DataSource, IngestionJob
 from app.db.session import SessionLocal
 from app.services.ingestion.service import run_job
 
@@ -83,3 +84,45 @@ async def test_propose_and_confirm_mappings(client: AsyncClient, two_tenants: di
     assert r.status_code == 200
     again_cols = {m["source_column"] for m in r.json()["mappings"]}
     assert "supplier_name" not in again_cols
+
+
+@pytest.mark.asyncio
+async def test_propose_mappings_rejects_job_from_another_source(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+
+    response = await client.post(
+        "/api/v1/datasets",
+        json={"name": "Tenant A source", "source_type": "csv", "config": {}},
+        headers=_csrf(client),
+    )
+    assert response.status_code == 201, response.text
+    tenant_a_source_id = response.json()["id"]
+
+    async with SessionLocal() as db:
+        tenant_b_source = DataSource(
+            tenant_id=two_tenants["tenant_b"],
+            name="Tenant B source",
+            source_type="csv",
+            config={},
+        )
+        db.add(tenant_b_source)
+        await db.flush()
+        tenant_b_job = IngestionJob(
+            tenant_id=two_tenants["tenant_b"],
+            source_id=tenant_b_source.id,
+            status="succeeded",
+        )
+        db.add(tenant_b_job)
+        await db.commit()
+        tenant_b_job_id = str(tenant_b_job.id)
+
+    response = await client.post(
+        f"/api/v1/datasets/{tenant_a_source_id}/mappings/propose",
+        params={"job_id": tenant_b_job_id},
+        headers=_csrf(client),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"job not found: {tenant_b_job_id}"

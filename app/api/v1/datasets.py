@@ -121,6 +121,15 @@ async def upload_dataset(
     ).scalar_one_or_none()
     if source is None:
         raise HTTPException(status_code=404, detail="dataset not found")
+    if source.source_type == "agent":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "agent sources cannot receive direct uploads; "
+                "use POST /api/v1/datasets/{id}/ingest to request "
+                "content from the on-prem agent"
+            ),
+        )
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="no filename")
@@ -132,6 +141,33 @@ async def upload_dataset(
             detail=f"extension not allowed: {ext}",
         )
 
+    compatible_extensions = {
+        "csv": {".csv"},
+        "excel": {".xlsx", ".xls"},
+        "pdf": {".pdf"},
+    }
+    if source.source_type not in compatible_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"source type {source.source_type!r} does not support "
+                "direct file uploads"
+            ),
+        )
+    if ext not in compatible_extensions[source.source_type]:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"source is typed {source.source_type!r} but "
+                f"received {ext!r}"
+            ),
+        )
+
+    try:
+        ingestion_service.extension_to_source_type(ext)
+    except IngestionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     content = await file.read()
     max_bytes = (
         settings.max_pdf_upload_bytes if ext == ".pdf"
@@ -142,14 +178,6 @@ async def upload_dataset(
             status_code=413,
             detail=f"file too large (max {max_bytes} bytes)",
         )
-
-    # Derive source_type from extension. Overrides whatever was passed at create.
-    try:
-        source_type = ingestion_service.extension_to_source_type(ext)
-    except IngestionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    source.source_type = source_type
 
     storage_key = ingestion_service.build_storage_key(
         tenant_id=tenant_id,
@@ -347,7 +375,9 @@ async def recompute_job_profile(
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
 
-    profile = await understanding_service.compute_profile(db, job_id=job_id)
+    profile = await understanding_service.compute_profile(
+        db, tenant_id=tenant_id, job_id=job_id
+    )
     await db.commit()
     await db.refresh(profile)
     return profile
@@ -438,7 +468,7 @@ async def classify_observations_endpoint(
             detail="classification is only available for agent sources",
         )
     result = await agent_classifier.classify_observations(
-        db, source_id=dataset_id
+        db, tenant_id=tenant_id, source_id=dataset_id
     )
     return ClassificationRead(**result.to_dict())
 
@@ -473,7 +503,7 @@ async def _trigger_agent_ingest(
         )
 
     classification = await agent_classifier.classify_observations(
-        db, source_id=dataset_id
+        db, tenant_id=tenant_id, source_id=dataset_id
     )
     if not classification.ready:
         raise HTTPException(

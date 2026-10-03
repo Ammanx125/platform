@@ -27,10 +27,15 @@ from app.services.understanding.matcher import (
 )
 
 
-async def _load_columns(db: AsyncSession, *, job_id: uuid.UUID) -> list[str]:
+async def _load_columns(
+    db: AsyncSession, *, tenant_id: uuid.UUID, job_id: uuid.UUID
+) -> list[str]:
     profile = (
         await db.execute(
-            select(DataProfile).where(DataProfile.job_id == job_id)
+            select(DataProfile).where(
+                DataProfile.job_id == job_id,
+                DataProfile.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
     if profile is None:
@@ -46,6 +51,8 @@ async def _load_columns(db: AsyncSession, *, job_id: uuid.UUID) -> list[str]:
 async def propose_mappings(
     db: AsyncSession,
     *,
+    tenant_id: uuid.UUID,
+    source_id: uuid.UUID,
     job_id: uuid.UUID,
     matcher: SemanticMatcher | None = None,
 ) -> list[SemanticMapping]:
@@ -53,21 +60,33 @@ async def propose_mappings(
     Run the matcher against the columns of a job's profile and persist new
     proposals. Returns the newly created SemanticMapping rows.
 
+    Verifies the job belongs to the given source and tenant.
     Existing mappings for the source are left untouched.
     """
     job = (
-        await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
+        await db.execute(
+            select(IngestionJob).where(
+                IngestionJob.id == job_id,
+                IngestionJob.tenant_id == tenant_id,
+                IngestionJob.source_id == source_id,
+            )
+        )
     ).scalar_one_or_none()
     if job is None:
         raise ValueError(f"job not found: {job_id}")
 
     source = (
-        await db.execute(select(DataSource).where(DataSource.id == job.source_id))
+        await db.execute(
+            select(DataSource).where(
+                DataSource.id == job.source_id,
+                DataSource.tenant_id == tenant_id,
+            )
+        )
     ).scalar_one_or_none()
     if source is None:
         raise ValueError(f"source not found: {job.source_id}")
 
-    columns = await _load_columns(db, job_id=job_id)
+    columns = await _load_columns(db, tenant_id=tenant_id, job_id=job_id)
     if not columns:
         return []
 
@@ -75,7 +94,8 @@ async def propose_mappings(
         (
             await db.execute(
                 select(SemanticMapping.source_column).where(
-                    SemanticMapping.source_id == source.id
+                    SemanticMapping.source_id == source.id,
+                    SemanticMapping.tenant_id == tenant_id,
                 )
             )
         ).scalars().all()

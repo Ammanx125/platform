@@ -131,19 +131,29 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
     persisted on the job row.
     """
     job = (
-        await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
+        await db.execute(
+            select(IngestionJob)
+            .where(IngestionJob.id == job_id)
+            .with_for_update(skip_locked=True)
+        )
     ).scalar_one_or_none()
     if job is None:
         return
     if job.status not in ("pending",):
         return
+    tenant_id = job.tenant_id
 
     source = (
-        await db.execute(select(DataSource).where(DataSource.id == job.source_id))
+        await db.execute(
+            select(DataSource).where(
+                DataSource.id == job.source_id,
+                DataSource.tenant_id == tenant_id,
+            )
+        )
     ).scalar_one_or_none()
     if source is None:
         job.status = "failed"
-        job.error_message = "source not found"
+        job.error_message = "source not found for tenant"
         job.finished_at = datetime.now(UTC)
         await db.commit()
         return
@@ -156,7 +166,10 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
     try:
         lineage_row = (
             await db.execute(
-                select(IngestionLineage).where(IngestionLineage.job_id == job.id)
+                select(IngestionLineage).where(
+                    IngestionLineage.job_id == job.id,
+                    IngestionLineage.tenant_id == tenant_id,
+                )
             )
         ).scalar_one_or_none()
         if lineage_row is None:
@@ -259,7 +272,9 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         # profile. Kept inside the try so a profiling failure fails the job.
         await db.flush()
         from app.services.understanding.service import compute_profile
-        await compute_profile(db, job_id=job.id)
+        await compute_profile(
+            db, tenant_id=job.tenant_id, job_id=job.id
+        )
 
         # Record ingestion timestamps for every staged row. Idempotent.
         from app.services.timestamps.service import (
@@ -318,7 +333,12 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         await db.rollback()
         # Re-fetch job to mark failure (rollback discarded the running state)
         job = (
-            await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
+            await db.execute(
+                select(IngestionJob).where(
+                    IngestionJob.id == job_id,
+                    IngestionJob.tenant_id == tenant_id,
+                )
+            )
         ).scalar_one_or_none()
         if job is not None:
             job.status = "failed"

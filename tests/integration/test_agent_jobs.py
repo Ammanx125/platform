@@ -6,9 +6,15 @@ from __future__ import annotations
 
 import hashlib
 import io
+from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
+
+from app.db.models.dataset import DataSource, IngestionJob
+from app.db.session import SessionLocal
+from app.services.agents.classifier import classify_observations
+from app.workers.tasks.ingestion import run_ingestion_once
 
 
 def _csrf(client: AsyncClient) -> dict[str, str]:
@@ -84,6 +90,18 @@ async def test_classification_and_ingest_flow(
     )
     assert r.status_code == 200
 
+    async with SessionLocal() as db:
+        foreign_classification = await classify_observations(
+            db,
+            tenant_id=two_tenants["tenant_b"],
+            source_id=UUID(source_id),
+        )
+    assert foreign_classification.counts() == {
+        "ready": 0,
+        "needs_review": 0,
+        "unsupported": 0,
+    }
+
     # Classification shows one ready, one unsupported.
     r = await client.get(f"/api/v1/datasets/{source_id}/observations/classification")
     assert r.status_code == 200
@@ -131,3 +149,30 @@ async def test_classification_and_ingest_flow(
     assert len(jobs_resp) >= 1
     # The first ingestion job should now be succeeded (or at least not pending).
     assert any(j["status"] in ("succeeded", "running") for j in jobs_resp)
+
+
+@pytest.mark.asyncio
+async def test_worker_skips_agent_ingestion_until_content_is_uploaded(
+    two_tenants: dict,
+) -> None:
+    async with SessionLocal() as db:
+        source = DataSource(
+            tenant_id=two_tenants["tenant_a"],
+            name="Agent awaiting upload",
+            source_type="agent",
+            config={},
+        )
+        db.add(source)
+        await db.flush()
+        job = IngestionJob(
+            tenant_id=two_tenants["tenant_a"],
+            source_id=source.id,
+            status="pending",
+        )
+        db.add(job)
+        await db.flush()
+
+        processed = await run_ingestion_once(db)
+
+        assert processed == 0
+        assert job.status == "pending"

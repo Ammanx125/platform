@@ -80,7 +80,10 @@ async def dispatch_once(db: AsyncSession, *, batch: int = 10) -> int:
 
         for trigger in matched:
             claimed = await _try_claim_trigger(
-                db, trigger_id=trigger.id, now=now
+                db,
+                trigger_id=trigger.id,
+                tenant_id=event.tenant_id,
+                now=now,
             )
             if claimed is None:
                 continue
@@ -146,13 +149,18 @@ async def _matching_triggers(
 
 
 async def _try_claim_trigger(
-    db: AsyncSession, *, trigger_id: uuid.UUID, now: datetime
+    db: AsyncSession,
+    *,
+    trigger_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    now: datetime,
 ) -> WorkflowTrigger | None:
     """Atomically claim a trigger cooldown window if it has elapsed."""
     stmt = (
         update(WorkflowTrigger)
         .where(
             WorkflowTrigger.id == trigger_id,
+            WorkflowTrigger.tenant_id == tenant_id,
             WorkflowTrigger.enabled.is_(True),
             or_(
                 WorkflowTrigger.last_fired_at.is_(None),

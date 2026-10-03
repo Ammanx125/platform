@@ -75,6 +75,66 @@ async def test_csv_upload_and_run(client: AsyncClient, two_tenants: dict) -> Non
 
 
 @pytest.mark.asyncio
+async def test_agent_source_rejects_direct_upload(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+
+    response = await client.post(
+        "/api/v1/datasets",
+        json={"name": "Agent upload guard", "source_type": "agent", "config": {}},
+        headers=_csrf(client),
+    )
+    assert response.status_code == 201, response.text
+    source_id = response.json()["id"]
+
+    response = await client.post(
+        f"/api/v1/datasets/{source_id}/upload",
+        files={"file": ("data.csv", io.BytesIO(CSV), "text/csv")},
+        headers=_csrf(client),
+    )
+    assert response.status_code == 400
+    assert "agent sources cannot receive direct uploads" in response.json()["detail"]
+
+    response = await client.get(f"/api/v1/datasets/{source_id}")
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "agent"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_extension_not_matching_source_type(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+
+    response = await client.post(
+        "/api/v1/datasets",
+        json={"name": "CSV extension guard", "source_type": "csv", "config": {}},
+        headers=_csrf(client),
+    )
+    assert response.status_code == 201, response.text
+    source_id = response.json()["id"]
+
+    response = await client.post(
+        f"/api/v1/datasets/{source_id}/upload",
+        files={
+            "file": (
+                "data.xlsx",
+                io.BytesIO(b"not really xlsx"),
+                "application/octet-stream",
+            )
+        },
+        headers=_csrf(client),
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "source is typed 'csv' but received '.xlsx'"
+
+    response = await client.get(f"/api/v1/datasets/{source_id}")
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "csv"
+
+
+@pytest.mark.asyncio
 async def test_agent_csv_ingestion_uses_job_storage_key(
     two_tenants: dict,
 ) -> None:

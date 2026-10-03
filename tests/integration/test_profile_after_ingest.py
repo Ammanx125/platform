@@ -9,6 +9,7 @@ from app.db.models.dataset import IngestionJob
 from app.db.models.understanding import DataProfile
 from app.db.session import SessionLocal
 from app.services.ingestion.service import run_job
+from app.services.understanding.service import compute_profile
 
 CSV = (
     b"supplier,supplier_id,quantity,price,order_date\n"
@@ -59,6 +60,14 @@ async def test_profile_is_written_after_ingest(client: AsyncClient, two_tenants:
         # supplier_id has a duplicate, so duplicate_entity should fire
         issue_codes = {i["code"] for i in profile.issues}
         assert "duplicate_entity" in issue_codes
+
+    async with SessionLocal() as db:
+        with pytest.raises(ValueError, match="job not found"):
+            await compute_profile(
+                db,
+                tenant_id=two_tenants["tenant_b"],
+                job_id=job_id,
+            )
 
 
 @pytest.mark.asyncio

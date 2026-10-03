@@ -97,7 +97,12 @@ async def propose_mappings(
     """
     await _get_source_or_404(db, source_id=dataset_id, tenant_id=tenant_id)
     try:
-        created = await mapper_service.propose_mappings(db, job_id=job_id)
+        created = await mapper_service.propose_mappings(
+            db,
+            tenant_id=tenant_id,
+            source_id=dataset_id,
+            job_id=job_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     await db.commit()

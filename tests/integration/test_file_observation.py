@@ -1,10 +1,12 @@
 # tests/integration/test_file_observation.py
 import io
+import uuid
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.db.models.dataset import StagedRow
 from app.db.models.timestamps import FileObservation, RowTimestamp
 from app.db.session import SessionLocal
 from app.services.ingestion.service import hash_bytes, run_job
@@ -65,7 +67,14 @@ async def test_upload_creates_file_observation(
     async with SessionLocal() as db:
         row_ts = (
             await db.execute(
-                select(RowTimestamp).where(RowTimestamp.kind == "ingestion")
+                select(RowTimestamp)
+                .join(StagedRow, StagedRow.id == RowTimestamp.staged_row_id)
+                .where(
+                    RowTimestamp.kind == "ingestion",
+                    RowTimestamp.tenant_id == two_tenants["tenant_a"],
+                    StagedRow.job_id == uuid.UUID(job_id),
+                    StagedRow.tenant_id == two_tenants["tenant_a"],
+                )
             )
         ).scalars().all()
         assert len(row_ts) == 2   # two data rows in CSV

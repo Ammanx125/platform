@@ -49,7 +49,10 @@ async def test_concurrent_cooldown_claim(concurrency_env: dict) -> None:
     async def _claim():
         async with SessionLocal() as db:
             claimed = await dispatcher._try_claim_trigger(
-                db, trigger_id=trigger_id, now=now
+                db,
+                trigger_id=trigger_id,
+                tenant_id=tenant_a,
+                now=now,
             )
             await db.commit()
             return claimed is not None

@@ -198,7 +198,8 @@ async def _update_pending_upload(
     pending = (
         await db.execute(
             select(PendingFileUpload).where(
-                PendingFileUpload.agent_job_id == job.id
+                PendingFileUpload.agent_job_id == job.id,
+                PendingFileUpload.tenant_id == job.tenant_id,
             )
         )
     ).scalar_one_or_none()
@@ -235,10 +236,21 @@ async def _maybe_trigger_ingestion(
     from app.db.models.agent import PendingFileUpload
     from app.db.models.dataset import IngestionJob
 
+    job_row = (
+        await db.execute(
+            select(IngestionJob).where(IngestionJob.id == ingestion_job_id)
+        )
+    ).scalar_one_or_none()
+    if job_row is None:
+        return
+
+    tenant_id = job_row.tenant_id
+
     pending = (
         await db.execute(
             select(PendingFileUpload).where(
-                PendingFileUpload.job_id == ingestion_job_id
+                PendingFileUpload.job_id == ingestion_job_id,
+                PendingFileUpload.tenant_id == tenant_id,
             )
         )
     ).scalars().all()
@@ -253,16 +265,10 @@ async def _maybe_trigger_ingestion(
     delivered = [p for p in pending if p.status == "delivered"]
     if not delivered:
         # Every file failed.
-        job_row = (
-            await db.execute(
-                select(IngestionJob).where(IngestionJob.id == ingestion_job_id)
-            )
-        ).scalar_one_or_none()
-        if job_row is not None:
-            job_row.status = "failed"
-            job_row.error_message = "no files were delivered by the agent"
-            job_row.finished_at = datetime.now(UTC)
-            await db.flush()
+        job_row.status = "failed"
+        job_row.error_message = "no files were delivered by the agent"
+        job_row.finished_at = datetime.now(UTC)
+        await db.flush()
         return
 
     # Run the job. Import here to avoid circular imports.

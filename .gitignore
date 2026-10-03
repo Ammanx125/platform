@@ -2,3 +2,7 @@ data/uploads/
 __pycache__/
 *.py[cod]
 
+# Local environment secrets
+.env
+.env.*
+!.env.example

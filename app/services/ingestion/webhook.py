@@ -143,6 +143,7 @@ async def record_delivery(
         await db.execute(
             select(IngestionJob).where(
                 IngestionJob.source_id == source.id,
+                IngestionJob.tenant_id == source.tenant_id,
                 IngestionJob.status == "pending",
             )
         )
@@ -195,6 +196,7 @@ async def process_pending_deliveries(
         await db.execute(
             select(WebhookDelivery).where(
                 WebhookDelivery.source_id == job.source_id,
+                WebhookDelivery.tenant_id == job.tenant_id,
                 WebhookDelivery.status == "pending",
             ).order_by(WebhookDelivery.received_at.asc())
         )

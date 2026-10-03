@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.actions import router as actions_router
 from app.api.v1.agents import router as agents_router
 from app.api.v1.analytics import router as analytics_router
+from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.datasets import router as datasets_router
@@ -28,6 +29,7 @@ api_router.include_router(mappings_router)
 api_router.include_router(decisions_router)
 api_router.include_router(actions_router)
 api_router.include_router(analytics_router)
+api_router.include_router(audit_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(workflows_router)
 api_router.include_router(tool_policies_router)

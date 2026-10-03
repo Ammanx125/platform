@@ -18,16 +18,22 @@ from app.services.understanding.quality import assess_quality
 
 
 async def compute_profile(
-    db: AsyncSession, *, job_id: uuid.UUID
+    db: AsyncSession, *, tenant_id: uuid.UUID, job_id: uuid.UUID
 ) -> DataProfile:
     """
     Compute (or recompute) the profile for one ingestion job.
 
     Idempotent: if a DataProfile already exists for the job, it is replaced.
-    Raises ValueError if the job does not exist.
+    Raises ValueError if the job does not exist or does not belong to
+    `tenant_id`.
     """
     job = (
-        await db.execute(select(IngestionJob).where(IngestionJob.id == job_id))
+        await db.execute(
+            select(IngestionJob).where(
+                IngestionJob.id == job_id,
+                IngestionJob.tenant_id == tenant_id,
+            )
+        )
     ).scalar_one_or_none()
     if job is None:
         raise ValueError(f"job not found: {job_id}")
@@ -35,7 +41,10 @@ async def compute_profile(
     rows = (
         await db.execute(
             select(StagedRow)
-            .where(StagedRow.job_id == job_id)
+            .where(
+                StagedRow.job_id == job_id,
+                StagedRow.tenant_id == tenant_id,
+            )
             .order_by(StagedRow.row_number.asc())
         )
     ).scalars().all()
@@ -47,7 +56,10 @@ async def compute_profile(
 
     existing = (
         await db.execute(
-            select(DataProfile).where(DataProfile.job_id == job_id)
+            select(DataProfile).where(
+                DataProfile.job_id == job_id,
+                DataProfile.tenant_id == tenant_id,
+            )
         )
     ).scalar_one_or_none()
 

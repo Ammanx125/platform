@@ -95,11 +95,41 @@ async def test_trigger_cooldown_can_only_be_claimed_once(db, two_tenants):
     await db.flush()
     now = datetime.now(UTC)
 
-    claimed = await dispatcher._try_claim_trigger(db, trigger_id=trigger.id, now=now)
+    claimed = await dispatcher._try_claim_trigger(
+        db,
+        trigger_id=trigger.id,
+        tenant_id=two_tenants["tenant_a"],
+        now=now,
+    )
     second_claim = await dispatcher._try_claim_trigger(
-        db, trigger_id=trigger.id, now=now
+        db,
+        trigger_id=trigger.id,
+        tenant_id=two_tenants["tenant_a"],
+        now=now,
     )
 
     assert claimed is not None
     assert claimed.last_fired_at == now
     assert second_claim is None
+
+
+@pytest.mark.asyncio
+async def test_trigger_claim_rejects_wrong_tenant(db, two_tenants):
+    trigger = WorkflowTrigger(
+        tenant_id=two_tenants["tenant_a"],
+        workflow_key="test.workflow",
+        event_type_filter=types.INGESTION_COMPLETED,
+        enabled=True,
+        cooldown_seconds=60,
+    )
+    db.add(trigger)
+    await db.flush()
+
+    claimed = await dispatcher._try_claim_trigger(
+        db,
+        trigger_id=trigger.id,
+        tenant_id=two_tenants["tenant_b"],
+        now=datetime.now(UTC),
+    )
+
+    assert claimed is None

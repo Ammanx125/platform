@@ -57,7 +57,10 @@ class SQLRetriever:
         stmt = (
             select(StagedRow, DataSource.name.label("source_name"))
             .join(DataSource, DataSource.id == StagedRow.source_id)
-            .where(StagedRow.tenant_id == tenant_id)
+            .where(
+                StagedRow.tenant_id == tenant_id,
+                DataSource.tenant_id == tenant_id,
+            )
         )
 
         f = filters or RetrievalFilters()
