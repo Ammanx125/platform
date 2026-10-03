@@ -9,8 +9,9 @@ Every formula references concepts that exist in the base catalog
 (seed_concepts.py). If a formula references a concept that doesn't exist,
 that's a bug in this file, not at evaluation time.
 
-Scope for Step 8a: 8 starter KPIs across Procurement, Inventory, Sales,
-and Finance. All are expressible with the fixed operation set.
+Base KPIs across Procurement, Inventory, Sales, Finance, and Operations.
+Industry-specific KPIs are installed with their industry pack. All are
+expressible with the fixed operation set.
 """
 from __future__ import annotations
 
@@ -113,6 +114,15 @@ KPIS: list[tuple[str, str, str, str | None, str, dict, str | None]] = [
             "scale": 100,
         },
         "Percentage of revenue remaining after direct costs.",
+    ),
+    (
+        "operations.average_downtime",
+        "Average Downtime",
+        "Operations",
+        "hours",
+        "number",
+        {"op": "avg", "concept": "Operations.Downtime"},
+        "Average recorded operational downtime.",
     ),
 ]
 

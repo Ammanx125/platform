@@ -19,13 +19,30 @@ async def _login(client: AsyncClient, email: str, password: str) -> None:
     )
 
 
-async def _seed_pending_action(tenant_id, user_id, tool="generate_report") -> str:
+async def _seed_pending_action(
+    tenant_id,
+    user_id,
+    tool="generate_report",
+    *,
+    rationale="Fuel consumption increased across the latest reporting periods.",
+    evidence_count=4,
+) -> str:
     async with SessionLocal() as db:
         record = ActionRecord(
             tenant_id=tenant_id,
             user_id=user_id,
             tool_name=tool,
             arguments={"title": "pending", "body": "x" * 50},
+            rationale=rationale,
+            validation_result={
+                "validators": [
+                    {
+                        "name": "validate_evidence_cited",
+                        "passed": True,
+                        "detail": {"evidence_count": evidence_count},
+                    }
+                ]
+            },
             status="pending_approval",
             proposed_at=datetime.now(UTC),
         )
@@ -33,6 +50,33 @@ async def _seed_pending_action(tenant_id, user_id, tool="generate_report") -> st
         await db.commit()
         await db.refresh(record)
         return str(record.id)
+
+
+@pytest.mark.asyncio
+async def test_approval_page_uses_recommendation_language_and_demo_simulation(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+    await _seed_pending_action(
+        two_tenants["tenant_a"],
+        two_tenants["user_a"],
+        rationale="Fuel consumption increased 14% over three periods.",
+        evidence_count=4,
+    )
+
+    response = await client.get("/approvals")
+
+    assert response.status_code == 200
+    assert "Recommended action" in response.text
+    assert "Prepare a business report from the supporting evidence." in response.text
+    assert "Why" in response.text
+    assert "Fuel consumption increased 14% over three periods." in response.text
+    assert "4 signals" in response.text
+    assert "Simulate execution" in response.text
+    assert "Demo only." in response.text
+    assert "will not execute it" in response.text
+    assert 'data-simulate-action' in response.text
+    assert "generate_report" in response.text
 
 
 @pytest.mark.asyncio

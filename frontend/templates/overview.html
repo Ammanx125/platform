@@ -2,94 +2,183 @@
 {% block title %}Overview · {{ app_name }}{% endblock %}
 {% block main %}
 
-<header class="page-header">
-  <div class="eyebrow">Operational overview</div>
-  <h1 class="page-title">Overview</h1>
-  <p class="page-subtitle">Business state and management attention.</p>
+<header class="command-header">
+  <div>
+    <div class="eyebrow">Management intelligence · {{ tenant_name }}</div>
+    <h1 class="page-title">Business command center</h1>
+    <p class="page-subtitle">Your latest performance, signals, and decisions in one place.</p>
+  </div>
+  <div class="command-status">
+    <span class="status-indicator" aria-hidden="true"></span>
+    <span>Workspace view</span>
+  </div>
 </header>
 
-{% set approvals_count = pending_actions|length %}
-{% set anomaly_count = recent_anomalies|selectattr("severity", "in", ["error", "critical"])|list|length %}
-<div class="attention" aria-label="Priority alerts">
-  <a class="attention-item" href="/approvals" data-empty="{{ 'true' if approvals_count == 0 else 'false' }}">
-    <span class="attention-count">{{ approvals_count }}</span>
-    <span class="attention-label">pending approval{{ "" if approvals_count == 1 else "s" }}</span>
+<section class="command-metrics" aria-label="Business snapshot">
+  {% for k in kpis[:3] %}
+    <article class="command-metric">
+      <div class="command-metric-label">{{ k.display_name }}</div>
+      <div class="command-metric-value">
+        {% if k.value is mapping %}
+          {{ k.value|length }}<span class="stat-unit">groups</span>
+        {% elif k.value is number %}
+          {{ "%.2f"|format(k.value) }}
+        {% else %}
+          {{ k.value }}
+        {% endif %}
+        {% if k.unit and k.value is not mapping %}
+          <span class="stat-unit">{{ k.unit }}</span>
+        {% endif %}
+      </div>
+      <div class="command-metric-context">{{ k.domain }} · computed from connected data</div>
+    </article>
+  {% endfor %}
+  <a class="command-metric command-metric-action" href="/approvals">
+    <div class="command-metric-label">Awaiting your review</div>
+    <div class="command-metric-value">{{ pending_count }}</div>
+    <div class="command-metric-context">Pending approvals · review actions</div>
   </a>
-  <a class="attention-item" href="/datasets" data-empty="{{ 'true' if anomaly_count == 0 else 'false' }}">
-    <span class="attention-count">{{ anomaly_count }}</span>
-    <span class="attention-label">high-severity anomal{{ "y" if anomaly_count == 1 else "ies" }}</span>
-  </a>
-</div>
-
-<section class="section panel">
-  <div class="section-header">
-    <h2 class="section-title">Ask Sansa</h2>
-    <span class="section-meta">Decision support</span>
-  </div>
-  <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-indicator">
-    <input class="input" type="text" name="query" required autocomplete="off" placeholder="What would you like to understand?">
-    <button type="submit" class="btn btn-primary">Ask Sansa</button>
-  </form>
-  <div class="ask-guidance">
-    <span id="ask-indicator" class="htmx-indicator loading-text">Analyzing…</span>
-    <span class="ask-hint">Ask about performance, anomalies, approvals, operations, or anything else in your connected data.</span>
-  </div>
-  <div id="ask-result"></div>
 </section>
 
-{% if kpis %}
-<section class="section">
+<section class="section panel outlook-panel">
   <div class="section-header">
-    <h2 class="section-title">Key business state</h2>
+    <div>
+      <div class="eyebrow">Predictive analytics</div>
+      <h2 class="section-title">Business outlook</h2>
+    </div>
+    {% if latest_forecast %}
+      <span class="badge badge-{{ 'success' if latest_forecast.reliability == 'high' else 'warning' if latest_forecast.reliability == 'medium' else 'neutral' }}">
+        {{ latest_forecast.reliability }} reliability
+      </span>
+    {% endif %}
   </div>
-  <div class="stat-row">
-    {% for k in kpis[:4] %}
-      <div class="stat">
-        <div class="stat-label">{{ k.display_name }}</div>
-        <div class="stat-value">
-          {% if k.value is mapping %}
-            {{ k.value|length }}<span class="stat-unit">groups</span>
-          {% elif k.value is not none %}
-            {% if k.value is number %}
-              {{ "%.2f"|format(k.value) }}
-            {% else %}
-              {{ k.value }}
-            {% endif %}
-            {% if k.unit %}<span class="stat-unit">{{ k.unit }}</span>{% endif %}
-          {% else %}
-            <span class="faint">—</span>
-          {% endif %}
+
+  {% if latest_forecast and forecast_plot_points %}
+    <div class="forecast-heading">
+      <div>
+        <div class="forecast-name">{{ latest_forecast.value_concept|replace("_", " ")|title }}</div>
+        <div class="row-secondary">
+          {{ latest_forecast.group_label or "All groups" }}
+          · {{ latest_forecast.horizon }}-step {{ latest_forecast.frequency }} forecast
         </div>
       </div>
-    {% endfor %}
+      <div class="forecast-model">
+        <span class="caption">Selected model</span>
+        <strong>{{ latest_forecast.model_used|replace("_", " ")|title }}</strong>
+      </div>
+    </div>
+    <div class="forecast-chart-wrap">
+      <svg class="forecast-chart" viewBox="0 0 720 180" role="img"
+        aria-label="Forecast projection for {{ latest_forecast.value_concept }}">
+        <line class="forecast-gridline" x1="0" y1="156" x2="720" y2="156"></line>
+        {% if forecast_plot_points|length > 1 %}
+          <polyline class="forecast-line" points="{{ forecast_plot_points|join(' ') }}"></polyline>
+        {% else %}
+          <circle class="forecast-point" cx="{{ forecast_plot_points[0].split(',')[0] }}"
+            cy="{{ forecast_plot_points[0].split(',')[1] }}" r="5"></circle>
+        {% endif %}
+      </svg>
+      <div class="forecast-axis-labels">
+        <span>Projected values</span>
+        <span>Through {{ latest_forecast.predicted_points[-1].timestamp[:10] }}</span>
+      </div>
+    </div>
+    <div class="forecast-footnote">
+      Generated {{ latest_forecast.trained_at.strftime("%b %d, %Y at %H:%M") }}
+      · Backtested using {{ latest_forecast.evaluation_metric|upper }}
+      {% if latest_forecast.validation_error is not none %}
+        ({{ "%.3g"|format(latest_forecast.validation_error) }})
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="outlook-empty">
+      <div class="outlook-mark" aria-hidden="true">↗</div>
+      <div>
+        <div class="row-primary">No saved forecast yet</div>
+        <div class="row-secondary">
+          Forecasts use mapped, time-stamped business data and the platform's
+          backtested forecasting models. Once a forecast run is saved, its
+          outlook will appear here.
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</section>
+
+{% if confirmed_mapping_count %}
+<section class="section panel semantic-layer-panel">
+  <header class="section-header">
+    <div>
+      <div class="eyebrow">Semantic understanding</div>
+      <h2 class="section-title">One business meaning, many source formats</h2>
+    </div>
+    <a class="section-action" href="/datasets">Explore connected data</a>
+  </header>
+  <div class="semantic-layer-intro">
+    Sansa keeps source columns intact and connects confirmed fields to
+    canonical business concepts. Analytics can then compare data even when
+    each system uses different labels.
   </div>
+  <div class="semantic-layer-stats">
+    <strong>{{ mapped_source_count }} source{{ "" if mapped_source_count == 1 else "s" }}</strong>
+    <span>·</span>
+    <strong>{{ confirmed_mapping_count }} confirmed mappings</strong>
+  </div>
+  {% if semantic_examples %}
+    <div class="semantic-example-list">
+      {% for example in semantic_examples %}
+        <a class="semantic-example" href="/datasets/{{ example[0] }}">
+          <span class="semantic-source">
+            <span class="row-primary">{{ example[1] }}</span>
+            <span class="row-secondary">“{{ example[2] }}”</span>
+          </span>
+          <span class="semantic-arrow" aria-hidden="true">→</span>
+          <span class="semantic-concept">
+            <span class="row-primary">{{ example[3] }}</span>
+            <span class="row-secondary">{{ example[4] }} concept</span>
+          </span>
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
 </section>
 {% endif %}
 
-<div class="content-grid">
+<div class="content-grid command-grid">
   <section class="section panel">
     <header class="section-header">
-      <h2 class="section-title">Recent anomalies</h2>
+      <div>
+        <div class="eyebrow">What changed</div>
+        <h2 class="section-title">Latest signals</h2>
+      </div>
+      <a class="section-action" href="/datasets">Review data</a>
     </header>
     {% if recent_anomalies %}
-      <div class="row-list">
+      <div class="signal-list">
         {% for a in recent_anomalies %}
-          <div class="row">
-            <div>
-              <div class="row-primary">{{ a.detector_key }}</div>
+          <article class="signal-row">
+            <span class="signal-dot signal-{{ 'critical' if a.severity in ['critical', 'error'] else 'warning' if a.severity == 'warning' else 'info' }}" aria-hidden="true"></span>
+            <div class="signal-copy">
+              <div class="row-primary">{{ a.detector_key|replace("_", " ")|title }}</div>
               <div class="row-secondary">
-                {% if a.group_label %}{{ a.group_label }} · {% endif %}{{ "%.4g"|format(a.value) }}
+                {{ a.severity|title }} ·
+                {% if a.group_label %}{{ a.group_label }} · {% endif %}
+                {{ "%.4g"|format(a.value) }}
+                {% if a.expected_min is not none and a.expected_max is not none %}
+                  · expected {{ "%.4g"|format(a.expected_min) }}–{{ "%.4g"|format(a.expected_max) }}
+                {% endif %}
               </div>
             </div>
-            <div class="row-meta">{{ a.point_timestamp.strftime("%Y-%m-%d") }}</div>
-          </div>
+            <time class="row-meta" datetime="{{ a.detected_at.isoformat() }}">{{ a.detected_at.strftime("%b %d") }}</time>
+          </article>
         {% endfor %}
       </div>
     {% else %}
-      <div class="row-list">
-        <div class="empty">
-          <div class="empty-title">No anomalies detected</div>
-          <div class="empty-detail">The platform will surface unusual patterns as it analyzes your data.</div>
+      <div class="signal-empty">
+        <span class="signal-dot signal-quiet" aria-hidden="true"></span>
+        <div>
+          <div class="row-primary">No anomaly signals recorded</div>
+          <div class="row-secondary">Detected patterns will be surfaced here as analysis runs.</div>
         </div>
       </div>
     {% endif %}
@@ -97,50 +186,64 @@
 
   <section class="section panel">
     <header class="section-header">
-      <h2 class="section-title">Recent decisions</h2>
-      <a class="section-action" href="/decisions">All decisions</a>
+      <div>
+        <div class="eyebrow">Needs a decision</div>
+        <h2 class="section-title">Management attention</h2>
+      </div>
+      <a class="section-action" href="/approvals">Approval center</a>
     </header>
-    {% if recent_decisions %}
-      <div class="row-list">
-        {% for d in recent_decisions %}
-          <a class="row" href="/decisions/{{ d.id }}" style="color:inherit;">
-            <div>
-              <div class="row-primary">{{ d.query|truncate(80) }}</div>
-              <div class="row-secondary">{{ d.llm_model or "—" }}</div>
-            </div>
-            <div class="row-meta">{{ d.created_at.strftime("%m-%d %H:%M") }}</div>
+    {% if pending_actions %}
+      <div class="attention-list">
+        {% for a in pending_actions[:4] %}
+          <a class="attention-row" href="/approvals">
+            <span class="attention-icon" aria-hidden="true">!</span>
+            <span class="signal-copy">
+              <span class="row-primary">{{ a.tool_name|replace("_", " ")|title }}</span>
+              {% if a.rationale %}<span class="row-secondary">{{ a.rationale|truncate(110) }}</span>{% endif %}
+            </span>
+            <span class="row-meta">{{ a.proposed_at.strftime("%b %d") if a.proposed_at else "" }}</span>
           </a>
         {% endfor %}
       </div>
     {% else %}
-      <div class="row-list">
-        <div class="empty">
-          <div class="empty-title">No decisions yet</div>
-          <div class="empty-detail">Ask Sansa a question above to run your first decision.</div>
+      <div class="signal-empty">
+        <span class="attention-icon attention-icon-clear" aria-hidden="true">✓</span>
+        <div>
+          <div class="row-primary">Nothing is waiting for approval</div>
+          <div class="row-secondary">Proposed actions that need your review will appear here.</div>
         </div>
+      </div>
+    {% endif %}
+    {% if recent_decisions %}
+      <div class="recent-decision">
+        <div class="caption">Latest decision</div>
+        <a class="row-primary" href="/decisions/{{ recent_decisions[0].id }}">
+          {{ recent_decisions[0].query|truncate(100) }}
+        </a>
+        <div class="row-secondary">{{ recent_decisions[0].created_at.strftime("%b %d, %Y at %H:%M") }}</div>
       </div>
     {% endif %}
   </section>
 </div>
 
-{% if pending_actions %}
-<section class="section panel">
-  <header class="section-header">
-    <h2 class="section-title">Awaiting approval</h2>
-    <a class="section-action" href="/approvals">Open approval center</a>
-  </header>
-  <div class="row-list">
-    {% for a in pending_actions[:3] %}
-      <a class="row" href="/approvals" style="color:inherit;">
-        <div>
-          <div class="row-primary">{{ a.tool_name }}</div>
-          {% if a.rationale %}<div class="row-secondary">{{ a.rationale|truncate(120) }}</div>{% endif %}
-        </div>
-        <div class="row-meta">{{ a.proposed_at.strftime("%m-%d %H:%M") if a.proposed_at else "" }}</div>
-      </a>
-    {% endfor %}
+<section class="section panel ask-command">
+  <div class="ask-command-copy">
+    <div class="eyebrow">Ask Sansa</div>
+    <h2 class="section-title">Put the signals in context.</h2>
+    <p class="row-secondary">Ask a question about your business data, recent anomalies, or decisions.</p>
   </div>
+  <div class="ask-command-form">
+    <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-indicator">
+      <input class="input" type="text" name="query" required autocomplete="off"
+        placeholder="e.g. What changed in our latest operating results?">
+      <button type="submit" class="btn btn-primary">Ask Sansa</button>
+    </form>
+    <div class="ask-guidance">
+      <span id="ask-indicator" class="htmx-indicator loading-text">Analyzing…</span>
+      <span class="ask-hint">Answers are grounded in connected business data.</span>
+    </div>
+  </div>
+  <div id="ask-result" class="ask-command-result"></div>
 </section>
-{% endif %}
 
 {% endblock %}

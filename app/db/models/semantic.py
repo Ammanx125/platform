@@ -169,17 +169,18 @@ class ConceptRelationship(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
 class IndustryPack(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """
-    A named bundle of concepts, relationships, and (later) KPI definitions.
+    A named bundle of concepts, relationships, and KPI definitions.
 
     Global (not tenant-scoped). Packs are installed per-tenant via
     TenantIndustryPack. Installing a pack materializes its inline concept
-    and relationship definitions into the global catalog.
+    and relationship definitions into the global catalog and reconciles its
+    KPI definitions.
 
     Structure:
       key:           stable identifier, e.g. "procurement.v1"
       concepts:      list of concept dicts, same shape as seed_concepts.py
       relationships: list of {from_key, to_key, kind, cardinality, join_hint}
-      kpi_stubs:     reserved for Step 8 — list of {key, display_name, formula}
+      kpi_stubs:     list of KPI definition dicts including formula metadata
       version:       semver-ish string for change tracking
 
     Installing an already-installed pack re-runs materialization

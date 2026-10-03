@@ -2,6 +2,7 @@
 import pytest
 from sqlalchemy import select
 
+from app.db.models.analytics import KPIDefinition
 from app.db.models.semantic import (
     CanonicalConcept,
     ConceptRelationship,
@@ -89,3 +90,29 @@ async def test_install_unknown_pack_raises(two_tenants: dict) -> None:
             await packs_service.install_pack(
                 db, tenant_id=two_tenants["tenant_a"], pack_key="nonexistent.v1"
             )
+
+
+@pytest.mark.asyncio
+async def test_transport_pack_installs_its_kpis(two_tenants: dict) -> None:
+    async with SessionLocal() as db:
+        await seed_canonical_concepts(db)
+        await seed_industry_packs(db)
+        await db.commit()
+
+        await packs_service.install_pack(
+            db, tenant_id=two_tenants["tenant_a"], pack_key="transport.v1"
+        )
+        await db.commit()
+
+        passenger_volume = (
+            await db.execute(
+                select(KPIDefinition).where(
+                    KPIDefinition.key == "transport.passenger_volume"
+                )
+            )
+        ).scalar_one()
+        assert passenger_volume.owner_pack == "transport.v1"
+        assert passenger_volume.formula == {
+            "op": "sum",
+            "concept": "Transport.PassengerCount",
+        }

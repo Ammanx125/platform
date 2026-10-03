@@ -5,9 +5,10 @@ Starter industry packs.
 Each pack is a self-contained bundle of concepts + relationships. Installing
 it materializes those definitions into the global catalog.
 
-Two starter packs at Step 6:
+Starter packs:
   - procurement.v1 — Supplier, Purchase, PurchaseOrder, PurchasePrice, LeadTime
   - inventory.v1   — Product, SKU, StockLevel, StockMovement, Warehouse, ReorderPoint
+  - transport.v1   — Fleet, routes, passengers, fuel, and service-time concepts
 
 Concepts and relationships are defined inline here (as Python data), but the
 seed function persists them into IndustryPack rows so packs can be listed,
@@ -185,6 +186,179 @@ PACKS: list[dict] = [
             },
         ],
         "kpi_stubs": [],
+    },
+    {
+        "key": "transport.v1",
+        "display_name": "Transport Operations",
+        "description": (
+            "Fleet, route, passenger, fuel-efficiency, and service-time "
+            "concepts for transport operators."
+        ),
+        "version": "1.0.0",
+        "concepts": [
+            {
+                "key": "Operations.OccupiedHours",
+                "display_name": "Occupied Hours",
+                "domain": "Operations",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": ["occupied_hours", "active_hours", "hours_in_service"],
+                "description": "Hours of scheduled capacity actually used.",
+            },
+            {
+                "key": "Transport.Vehicle",
+                "display_name": "Vehicle",
+                "domain": "Transport",
+                "kind": "entity",
+                "value_type": "entity",
+                "synonyms": ["vehicle", "vehicle_id", "vehicle_ref", "bus", "bus_id"],
+                "description": "A vehicle used to provide transport services.",
+            },
+            {
+                "key": "Transport.Route",
+                "display_name": "Route",
+                "domain": "Transport",
+                "kind": "entity",
+                "value_type": "entity",
+                "synonyms": ["route", "route_name", "route_code", "service_route"],
+                "description": "A defined path or service operated by the fleet.",
+            },
+            {
+                "key": "Transport.PassengerCount",
+                "display_name": "Passenger Count",
+                "domain": "Transport",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": ["passengers", "passenger_count", "riders", "rider_count"],
+                "description": "The number of passengers carried.",
+            },
+            {
+                "key": "Transport.DistanceKm",
+                "display_name": "Distance KM",
+                "domain": "Transport",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": ["distance_km", "distance", "kilometres", "kilometers"],
+                "description": "Distance travelled, measured in kilometres.",
+            },
+            {
+                "key": "Transport.FuelConsumed",
+                "display_name": "Fuel Consumed",
+                "domain": "Transport",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": ["fuel_litres", "fuel_liters", "litres_used", "liters_used"],
+                "description": "Fuel consumed by a vehicle over a reporting period.",
+            },
+            {
+                "key": "Transport.FuelUseRate",
+                "display_name": "Fuel Use Rate",
+                "domain": "Transport",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": ["fuel_use_rate", "litres_per_100km", "liters_per_100km"],
+                "description": "Fuel consumed per 100 kilometres.",
+            },
+            {
+                "key": "Transport.TravelMinutes",
+                "display_name": "Travel Minutes",
+                "domain": "Transport",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": ["travel_minutes", "journey_minutes", "trip_duration_minutes"],
+                "description": "Elapsed travel time for a route service.",
+            },
+        ],
+        "relationships": [
+            {
+                "from_key": "Transport.Vehicle",
+                "to_key": "Management.BusinessUnit",
+                "kind": "belongs_to",
+                "cardinality": "N:1",
+                "description": "Vehicles are assigned to an operating depot.",
+            },
+            {
+                "from_key": "Transport.Route",
+                "to_key": "Transport.Vehicle",
+                "kind": "references",
+                "cardinality": "N:M",
+                "description": "Routes are serviced by fleet vehicles.",
+            },
+            {
+                "from_key": "Transport.PassengerCount",
+                "to_key": "Transport.Route",
+                "kind": "references",
+                "cardinality": "N:1",
+                "description": "Passenger counts are reported for a route.",
+            },
+            {
+                "from_key": "Transport.FuelConsumed",
+                "to_key": "Transport.Vehicle",
+                "kind": "references",
+                "cardinality": "N:1",
+                "description": "Fuel consumption is recorded for a vehicle.",
+            },
+        ],
+        "kpi_stubs": [
+            {
+                "key": "transport.passenger_volume",
+                "display_name": "Passenger Volume",
+                "domain": "Transport",
+                "unit": "count",
+                "value_type": "number",
+                "formula": {"op": "sum", "concept": "Transport.PassengerCount"},
+                "description": "Passengers carried in the tenant's transport data.",
+            },
+            {
+                "key": "transport.average_fuel_use_rate",
+                "display_name": "Average Fuel Use Rate",
+                "domain": "Transport",
+                "unit": "litres_per_100km",
+                "value_type": "number",
+                "formula": {"op": "avg", "concept": "Transport.FuelUseRate"},
+                "description": "Average litres consumed per 100 kilometres.",
+            },
+            {
+                "key": "transport.average_travel_time",
+                "display_name": "Average Route Travel Time",
+                "domain": "Transport",
+                "unit": "minutes",
+                "value_type": "number",
+                "formula": {"op": "avg", "concept": "Transport.TravelMinutes"},
+                "description": "Average reported route travel time.",
+            },
+            {
+                "key": "operations.capacity_utilization_pct",
+                "display_name": "Capacity Utilization",
+                "domain": "Operations",
+                "unit": "percent",
+                "value_type": "number",
+                "formula": {
+                    "op": "ratio",
+                    "numerator": {
+                        "op": "sum",
+                        "concept": "Operations.OccupiedHours",
+                    },
+                    "denominator": {
+                        "op": "sum",
+                        "concept": "Operations.Capacity",
+                    },
+                    "scale": 100,
+                },
+                "description": (
+                    "Occupied operating hours as a share of available capacity."
+                ),
+            },
+            {
+                "key": "transport.operating_cost",
+                "display_name": "Transport Operating Cost",
+                "domain": "Transport",
+                "unit": "currency",
+                "value_type": "number",
+                "formula": {"op": "sum", "concept": "Finance.Cost"},
+                "description": "Recorded transport operating costs.",
+            },
+        ],
     },
 ]
 

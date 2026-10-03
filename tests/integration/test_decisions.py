@@ -51,6 +51,27 @@ async def test_run_decision_with_mock_llm(
 
 
 @pytest.mark.asyncio
+async def test_ask_runs_domain_workflow_behind_business_outcome(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+
+    response = await client.post(
+        "/ask",
+        data={"query": "How are operations performing?"},
+        headers=_csrf(client),
+    )
+
+    assert response.status_code == 200
+    assert "Operations health" in response.text
+    assert "Sansa ran downtime anomalies and capacity utilization checks" in response.text
+    assert "How Sansa got here" in response.text
+    assert "Operations SLA Monitoring" in response.text
+    assert "/workflows/instances/" in response.text
+    assert '<details class="workflow-trace">' in response.text
+
+
+@pytest.mark.asyncio
 async def test_list_and_get_decision(
     client: AsyncClient, two_tenants: dict
 ) -> None:

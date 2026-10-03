@@ -1,53 +1,57 @@
-<details id="action-{{ a.id }}" class="swap-fade" {% if a.status != "pending_approval" %}open{% endif %} style="border-bottom:1px solid var(--border);">
-  <summary style="padding:0; display:block;">
-    <div class="approval-row" style="border-bottom:none;">
-      <div>
-        <div class="row-primary">{{ a.tool_name }}</div>
-        {% if a.rationale %}<div class="row-secondary">{{ a.rationale|truncate(120) }}</div>{% endif %}
-      </div>
-      <div class="row-meta">{{ a.proposed_at.strftime("%Y-%m-%d %H:%M") if a.proposed_at else "" }}</div>
-      <div>
-        {% if a.status == "pending_approval" %}<span class="badge badge-warning">pending</span>
-        {% elif a.status == "executed" %}<span class="badge badge-success">executed</span>
-        {% elif a.status == "rejected" %}<span class="badge badge-danger">rejected</span>
-        {% elif a.status == "failed" %}<span class="badge badge-danger">failed</span>
-        {% else %}<span class="badge badge-neutral">{{ a.status }}</span>{% endif %}
-      </div>
-      <div class="muted text-xs">Review →</div>
+<details id="action-{{ a.id }}" class="swap-fade approval-card"
+  {% if a.status != "pending_approval" %}open{% endif %}
+  data-approval-card>
+  <summary class="approval-summary">
+    <div class="approval-summary-main">
+      <span class="eyebrow">Recommended action</span>
+      <span class="row-primary">{{ recommended_action }}</span>
+      {% if a.rationale %}
+        <span class="row-secondary">{{ a.rationale|truncate(140) }}</span>
+      {% endif %}
     </div>
+    <span class="row-meta">{{ a.proposed_at.strftime("%b %d, %Y") if a.proposed_at else "" }}</span>
+    <span>
+      {% if a.status == "pending_approval" %}<span class="badge badge-warning">Needs review</span>
+      {% elif a.status == "executed" %}<span class="badge badge-success">Executed</span>
+      {% elif a.status == "rejected" %}<span class="badge badge-danger">Rejected</span>
+      {% elif a.status == "failed" %}<span class="badge badge-danger">Failed</span>
+      {% else %}<span class="badge badge-neutral">{{ a.status|replace("_", " ")|title }}</span>{% endif %}
+    </span>
+    <span class="muted text-xs">Details →</span>
   </summary>
 
   <div class="approval-detail">
-    <dl>
-      <dt>Tool</dt><dd class="mono">{{ a.tool_name }}</dd>
-      <dt>Arguments</dt>
-      <dd class="mono">
-        {%- for k, v in a.arguments.items() -%}
-          {{ k }}={{ v }}{% if not loop.last %}<br>{% endif %}
-        {%- endfor -%}
-      </dd>
-      {% if a.rationale %}<dt>Rationale</dt><dd>{{ a.rationale }}</dd>{% endif %}
-      <dt>Proposed by</dt><dd class="mono">{{ a.user_id }}</dd>
-      <dt>Proposed at</dt><dd class="mono">{{ a.proposed_at.strftime("%Y-%m-%d %H:%M:%S") if a.proposed_at else "—" }}</dd>
-      {% if a.decision_run_id %}
-        <dt>Decision</dt><dd><a href="/decisions/{{ a.decision_run_id }}" class="mono">Open decision →</a></dd>
-      {% endif %}
-    </dl>
-
-    {% if a.validation_result %}
-      <details>
-        <summary>Validation detail</summary>
-        <pre>{{ a.validation_result | tojson(indent=2) }}</pre>
-      </details>
+    {% if a.rationale %}
+      <section class="recommendation-block">
+        <div class="caption">Why</div>
+        <p>{{ a.rationale }}</p>
+      </section>
     {% endif %}
 
+    <div class="recommendation-evidence">
+      <span class="caption">Evidence</span>
+      {% if evidence_count is not none %}
+        <span class="badge badge-info">{{ evidence_count }} signal{{ "" if evidence_count == 1 else "s" }}</span>
+      {% else %}
+        <span class="muted text-xs">Evidence references attached</span>
+      {% endif %}
+    </div>
+
     {% if a.status == "pending_approval" %}
+      <div class="demo-notice" role="note">
+        Demo only. Simulating this action will not execute it, change its approval
+        status, contact anyone, or record a result on the server.
+      </div>
+      <div class="demo-result" data-demo-result role="status" aria-live="polite" hidden></div>
       <div class="btn-row mt-4">
-        <button class="btn btn-primary"
+        <button class="btn btn-primary" type="button" data-simulate-action>
+          Simulate execution
+        </button>
+        <button class="btn"
                 hx-post="/approvals/{{ a.id }}/approve"
                 hx-target="#action-{{ a.id }}"
                 hx-swap="outerHTML swap:120ms settle:120ms"
-                hx-disabled-elt="this">Approve action</button>
+                hx-disabled-elt="this">Approve and execute</button>
         <button class="btn btn-danger"
                 hx-post="/approvals/{{ a.id }}/reject"
                 hx-target="#action-{{ a.id }}"
@@ -55,5 +59,29 @@
                 hx-disabled-elt="this">Reject</button>
       </div>
     {% endif %}
+
+    <details class="approval-technical">
+      <summary>Technical and audit details</summary>
+      <dl>
+        <dt>Action type</dt><dd class="mono">{{ a.tool_name }}</dd>
+        <dt>Arguments</dt>
+        <dd class="mono">
+          {%- for k, v in a.arguments.items() -%}
+            {{ k }}={{ v }}{% if not loop.last %}<br>{% endif %}
+          {%- endfor -%}
+        </dd>
+        <dt>Proposed by</dt><dd class="mono">{{ a.user_id }}</dd>
+        <dt>Proposed at</dt><dd class="mono">{{ a.proposed_at.strftime("%Y-%m-%d %H:%M:%S") if a.proposed_at else "—" }}</dd>
+        {% if a.decision_run_id %}
+          <dt>Decision</dt><dd><a href="/decisions/{{ a.decision_run_id }}" class="mono">Open decision →</a></dd>
+        {% endif %}
+      </dl>
+      {% if a.validation_result %}
+        <details>
+          <summary>Validation detail</summary>
+          <pre>{{ a.validation_result | tojson(indent=2) }}</pre>
+        </details>
+      {% endif %}
+    </details>
   </div>
 </details>

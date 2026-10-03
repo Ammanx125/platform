@@ -7,6 +7,7 @@ time by the templates package. No DB, no session, no side effects.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.services.workflows.base import (
@@ -15,6 +16,17 @@ from app.services.workflows.base import (
 )
 
 _REGISTRY: dict[str, Workflow] = {}
+
+
+def _match_score(workflow: Workflow, query: str, tokens: set[str]) -> int:
+    score = 0
+    for keyword in workflow.trigger_keywords:
+        if " " in keyword:
+            if keyword in query:
+                score += len(keyword.split())
+        elif keyword in tokens:
+            score += 1
+    return score
 
 
 def register(workflow: Any) -> None:
@@ -54,15 +66,31 @@ def keys() -> list[str]:
 
 def match_by_query(query: str) -> list[str]:
     """
-    Return workflow keys whose trigger keywords overlap with the query.
+    Return workflow keys whose trigger keywords match the query, best match first.
 
-    Used by the orchestrator's planner rules tier. Does not rank; callers
-    that need ranking should count overlapping tokens.
+    Domain-specific trigger words are sufficient to route an explicit
+    business question (e.g. "How are operations performing?"). Multi-word
+    triggers are matched as phrases; single-word triggers are matched as
+    query tokens.
     """
-    import re
-    toks = set(re.findall(r"[a-z0-9]+", query.lower()))
-    matched: list[str] = []
+    normalized_query = query.lower()
+    toks = set(re.findall(r"[a-z0-9]+", normalized_query))
+    matched: list[tuple[int, str]] = []
     for wf in _REGISTRY.values():
-        if len(toks & wf.trigger_keywords) >= 2:
-            matched.append(wf.key)
-    return matched
+        score = _match_score(wf, normalized_query, toks)
+        if score:
+            matched.append((score, wf.key))
+    matched.sort(key=lambda item: (-item[0], item[1]))
+    return [key for _, key in matched]
+
+
+def match_score(query: str, workflow_key: str) -> int:
+    """Return the number of trigger terms matched for a registered workflow."""
+
+    workflow = _REGISTRY.get(workflow_key)
+    if workflow is None:
+        return 0
+
+    normalized_query = query.lower()
+    toks = set(re.findall(r"[a-z0-9]+", normalized_query))
+    return _match_score(workflow, normalized_query, toks)

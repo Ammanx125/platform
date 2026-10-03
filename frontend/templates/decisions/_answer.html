@@ -7,9 +7,52 @@
       <a href="/decisions/{{ decision_id }}" class="brief-time">Open decision →</a>
     </header>
 
+    {% if workflow %}
+      <section class="brief-section workflow-outcome">
+        <div class="brief-section-label">Business outcome</div>
+        <h3 class="workflow-outcome-title">{{ workflow.title }}</h3>
+        {% if workflow.status == "completed" %}
+          <p class="workflow-outcome-copy">
+            Sansa ran {{ workflow.description|lower }} checks against the latest
+            available business data.
+          </p>
+        {% elif workflow.status in ("waiting_workflow_approval", "waiting_action_approval", "waiting_input") %}
+          <p class="workflow-outcome-copy">
+            Sansa started {{ workflow.description|lower }} checks and is waiting
+            for the next required step.
+          </p>
+        {% else %}
+          <p class="workflow-outcome-copy">
+            Sansa could not complete {{ workflow.description|lower }} checks.
+            {% if workflow.error %}{{ workflow.error }}{% endif %}
+          </p>
+        {% endif %}
+        <details class="workflow-trace">
+          <summary>How Sansa got here · {{ workflow.name }}</summary>
+          <ol class="workflow-step-list">
+            {% for step in workflow.steps %}
+              <li>
+                <span class="workflow-step-status workflow-step-{{ step.status }}">{{ step.status|replace("_", " ")|title }}</span>
+                <span class="workflow-step-name">{{ step.name|replace("_", " ")|title }}</span>
+                {% if step.output and step.output.item_count is defined %}
+                  <span class="workflow-step-count">{{ step.output.item_count }} result{{ "" if step.output.item_count == 1 else "s" }}</span>
+                {% endif %}
+                {% if step.error %}<span class="workflow-step-error">{{ step.error }}</span>{% endif %}
+              </li>
+            {% endfor %}
+          </ol>
+          {% if workflow.instance_id %}
+            <a href="/workflows/instances/{{ workflow.instance_id }}" class="section-action">
+              Open workflow run details →
+            </a>
+          {% endif %}
+        </details>
+      </section>
+    {% endif %}
+
     {% if summary %}
       <section class="brief-section">
-        <div class="brief-section-label">Answer</div>
+        <div class="brief-section-label">{{ "Additional answer" if workflow else "Answer" }}</div>
         <div class="brief-conclusion">{{ summary }}</div>
       </section>
     {% else %}

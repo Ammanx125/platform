@@ -328,7 +328,12 @@ async def run_forecast_for_concept(
             points=s.points,
             horizon=horizon,
             requested_models=requested_models,
-            source_ids=[str(sid) for sid in build.series[0].points[0].source_id.__class__.__mro__[:0]] or [],
+            source_ids=[
+                str(source_id)
+                for source_id in dict.fromkeys(
+                    point.source_id for point in s.points
+                )
+            ],
         )
         results.append(result)
     return results

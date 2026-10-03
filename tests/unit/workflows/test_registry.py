@@ -20,6 +20,20 @@ def test_match_by_query_finds_procurement():
     assert "procurement.spend_analysis" in matches
 
 
+def test_match_by_query_routes_explicit_single_domain_mention():
+    import app.services.workflows  # noqa: F401
+    matches = match_by_query("How are operations performing?")
+    assert matches
+    assert matches[0] == "operations.sla_monitoring"
+
+
+def test_match_by_query_matches_multiword_trigger_phrases():
+    import app.services.workflows  # noqa: F401
+    matches = match_by_query("How are we performing?")
+    assert matches
+    assert matches[0] == "management.executive_summary"
+
+
 def test_match_by_query_no_match():
     import app.services.workflows  # noqa: F401
     assert match_by_query("the weather is nice") == []

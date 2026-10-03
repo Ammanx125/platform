@@ -23,7 +23,12 @@ from app.services.orchestration.context import (
     Plan,
     PlanStep,
 )
-from app.services.workflows.registry import match_by_query as match_workflows
+from app.services.workflows.registry import (
+    match_by_query as match_workflows,
+)
+from app.services.workflows.registry import (
+    match_score as workflow_match_score,
+)
 
 # Tokens that suggest a specific capability. Deliberately small; the LLM
 # router handles the rest.
@@ -101,11 +106,15 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
         ))
 
     # Domain workflows take precedence over generic capabilities when the
-    # query clearly belongs to a domain.
+    # query clearly belongs to a domain. A single domain mention routes broad
+    # health/status questions; more specific workflow matches can also take
+    # precedence over generic capability rules.
     matched_workflows = match_workflows(request.query)
-    if matched_workflows:
-        # Pick the first (registry iteration is stable). A future ranking
-        # would prefer the workflow with the most trigger-keyword overlap.
+    if matched_workflows and (
+        not steps
+        or workflow_match_score(request.query, matched_workflows[0]) >= 2
+    ):
+        # Workflow matching returns the strongest trigger match first.
         wf_key = matched_workflows[0]
         # Replace any generic steps with a single workflow step.
         return Plan(

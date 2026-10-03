@@ -17,8 +17,10 @@
 <section class="section">
   <div class="row-list">
     {% if actions %}
-      {% for a in actions %}
-        {% include "approvals/_row.html" with context %}
+      {% for presentation in actions %}
+        {% with a=presentation.a, recommended_action=presentation.recommended_action, evidence_count=presentation.evidence_count %}
+          {% include "approvals/_row.html" %}
+        {% endwith %}
       {% endfor %}
     {% else %}
       <div class="empty">

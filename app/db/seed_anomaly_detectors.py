@@ -60,6 +60,28 @@ DETECTORS: list[tuple] = [
         "warning",
         "IQR-based detection of downtime outliers per business unit.",
     ),
+    (
+        "transport.fuel_use_rate_spikes",
+        "Fuel Use Rate Spikes",
+        "Transport",
+        "Transport.FuelUseRate",
+        "Transport.Vehicle",
+        "zscore_rolling",
+        {"k": 1.5, "window": 4},
+        "warning",
+        "Flags unusually high fuel consumed per 100 kilometres by vehicle.",
+    ),
+    (
+        "transport.supplier_delay_spikes",
+        "Supplier Delivery Delays",
+        "Transport",
+        "Procurement.LeadTime",
+        "Procurement.Supplier",
+        "zscore_rolling",
+        {"k": 1.5, "window": 4},
+        "warning",
+        "Flags supplier delivery lead times that rise above their recent baseline.",
+    ),
 ]
 
 

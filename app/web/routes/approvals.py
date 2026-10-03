@@ -19,6 +19,38 @@ from app.web.templating import base_context, templates
 router = APIRouter()
 
 
+_ACTION_PRESENTATION = {
+    "generate_report": (
+        "Prepare a business report from the supporting evidence."
+    ),
+    "get_supplier_detail": "Review details for the selected supplier.",
+    "list_suppliers": "Review the suppliers connected to this workspace.",
+    "list_recent_anomalies": "Review recently detected business anomalies.",
+}
+
+
+def _action_presentation(record: ActionRecord) -> dict:
+    validator_results = (record.validation_result or {}).get("validators", [])
+    evidence_count = next(
+        (
+            detail["evidence_count"]
+            for result in validator_results
+            if isinstance(result, dict)
+            and isinstance((detail := result.get("detail")), dict)
+            and isinstance(detail.get("evidence_count"), int)
+        ),
+        None,
+    )
+    return {
+        "a": record,
+        "recommended_action": _ACTION_PRESENTATION.get(
+            record.tool_name,
+            f"Review: {record.tool_name.replace('_', ' ')}.",
+        ),
+        "evidence_count": evidence_count,
+    }
+
+
 @router.get("/approvals", response_class=HTMLResponse)
 async def approvals_list(
     request: Request,
@@ -45,7 +77,7 @@ async def approvals_list(
             "active_nav": "approvals",
             "tenant_name": str(user.tenant_id),
             "user_email": user.email,
-            "actions": rows,
+            "actions": [_action_presentation(row) for row in rows],
         },
     )
 
@@ -75,7 +107,7 @@ async def approve(
     return templates.TemplateResponse(
         request,
         "approvals/_row.html",
-        {"a": record},
+        _action_presentation(record),
     )
 
 
@@ -105,5 +137,5 @@ async def reject(
     return templates.TemplateResponse(
         request,
         "approvals/_row.html",
-        {"a": record},
+        _action_presentation(record),
     )

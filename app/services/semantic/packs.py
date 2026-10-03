@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.analytics import KPIDefinition
 from app.db.models.semantic import (
     CanonicalConcept,
     ConceptRelationship,
@@ -123,6 +124,41 @@ async def _materialize_relationships(
     await db.flush()
 
 
+async def _materialize_kpis(
+    db: AsyncSession, *, pack: IndustryPack
+) -> None:
+    """Reconcile KPI definitions declared by an industry pack."""
+    for spec in pack.kpi_stubs:
+        required = ("key", "display_name", "domain", "value_type", "formula")
+        missing = [field for field in required if not spec.get(field)]
+        if missing:
+            raise ValueError(
+                f"pack {pack.key!r} has a KPI definition missing {missing}"
+            )
+
+        kpi = (
+            await db.execute(
+                select(KPIDefinition).where(KPIDefinition.key == spec["key"])
+            )
+        ).scalar_one_or_none()
+        values = {
+            "display_name": spec["display_name"],
+            "domain": spec["domain"],
+            "unit": spec.get("unit"),
+            "value_type": spec["value_type"],
+            "formula": spec["formula"],
+            "description": spec.get("description"),
+            "owner_pack": pack.key,
+        }
+        if kpi is None:
+            db.add(KPIDefinition(key=spec["key"], **values))
+        else:
+            for field, value in values.items():
+                setattr(kpi, field, value)
+
+    await db.flush()
+
+
 async def install_pack(
     db: AsyncSession, *, tenant_id: uuid.UUID, pack_key: str
 ) -> TenantIndustryPack:
@@ -141,6 +177,7 @@ async def install_pack(
 
     await _materialize_concepts(db, pack=pack)
     await _materialize_relationships(db, pack=pack)
+    await _materialize_kpis(db, pack=pack)
 
     existing = (
         await db.execute(

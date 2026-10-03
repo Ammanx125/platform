@@ -90,7 +90,10 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     ),
     (
         "Finance.Cost", "Cost", "Finance", "attribute", "number",
-        ["cost", "total_cost", "direct_cost", "cogs", "cost_of_goods"],
+        [
+            "cost", "total_cost", "direct_cost", "cogs", "cost_of_goods",
+            "operating_cost", "operating_expense",
+        ],
         "Money spent to produce or acquire something.",
     ),
     (
@@ -184,7 +187,10 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     ),
     (
         "Management.BusinessUnit", "Business Unit", "Management", "entity", "entity",
-        ["business_unit", "bu", "division", "department", "segment", "unit"],
+        [
+            "business_unit", "bu", "division", "department", "segment", "unit",
+            "depot", "depot_name", "depot_id",
+        ],
         "An organisational subdivision used for reporting.",
     ),
 ]

@@ -1,10 +1,13 @@
 # tests/unit/analytics/test_forecasting.py
+import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
+from app.services.analytics import forecasting
 from app.services.analytics.forecasting import forecast_series
-from app.services.analytics.series import TimeSeriesPoint
+from app.services.analytics.series import TimeSeries, TimeSeriesPoint
 
 
 class _DBStub:
@@ -63,3 +66,60 @@ async def test_forecasts_a_clean_trend():
     assert result.model_used is not None
     assert len(result.predicted_points) == 5
     assert result.reliability in ("high", "medium", "low")
+
+
+@pytest.mark.asyncio
+async def test_concept_forecast_passes_source_ids_from_each_series(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_a, source_b, source_c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    built_series = [
+        TimeSeries(
+            group_key="north",
+            group_label="North",
+            value_concept="revenue",
+            group_by_concept="region",
+            points=[
+                TimeSeriesPoint(timestamp, 1.0, source_a),
+                TimeSeriesPoint(timestamp + timedelta(days=1), 2.0, source_b),
+                TimeSeriesPoint(timestamp + timedelta(days=2), 3.0, source_a),
+            ],
+        ),
+        TimeSeries(
+            group_key="south",
+            group_label="South",
+            value_concept="revenue",
+            group_by_concept="region",
+            points=[TimeSeriesPoint(timestamp, 4.0, source_c)],
+        ),
+    ]
+    build_kwargs: dict = {}
+    forecast_source_ids: list[list[str] | None] = []
+
+    async def fake_build_series(_db, **kwargs):
+        build_kwargs.update(kwargs)
+        return SimpleNamespace(series=built_series)
+
+    async def fake_forecast_series(_db, **kwargs):
+        forecast_source_ids.append(kwargs["source_ids"])
+        return kwargs["source_ids"]
+
+    monkeypatch.setattr(forecasting, "build_series", fake_build_series)
+    monkeypatch.setattr(forecasting, "forecast_series", fake_forecast_series)
+    selected_sources = [source_a, source_b, source_c]
+
+    results = await forecasting.run_forecast_for_concept(
+        _DBStub(),  # type: ignore[arg-type]
+        tenant_id=uuid.uuid4(),
+        value_concept="revenue",
+        group_by_concept="region",
+        source_ids=selected_sources,
+    )
+
+    assert build_kwargs["source_ids"] == selected_sources
+    assert forecast_source_ids == [
+        [str(source_a), str(source_b)],
+        [str(source_c)],
+    ]
+    assert results == forecast_source_ids

@@ -56,6 +56,22 @@
     }
   });
 
+  document.body.addEventListener("click", function (evt) {
+    var button = evt.target.closest("[data-simulate-action]");
+    if (!button) return;
+
+    var card = button.closest("[data-approval-card]");
+    var result = card && card.querySelector("[data-demo-result]");
+    if (!card || !result || button.disabled) return;
+
+    button.disabled = true;
+    button.textContent = "Demo completed";
+    card.setAttribute("data-demo-completed", "true");
+    result.hidden = false;
+    result.textContent =
+      "✓ Completed — Demonstration only. No action was executed or recorded on the server.";
+  });
+
   // Toast helper. Backend fragments can include an out-of-band swap that
   // contains a <template data-toast="..."> — we pop it and render a toast.
   document.body.addEventListener("htmx:afterSwap", function (evt) {
