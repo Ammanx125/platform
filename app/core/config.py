@@ -1,5 +1,6 @@
 # app/core/config.py
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,6 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = "Sansa"
     environment: str = "development"
+    redis_url: str | None = None
 
     database_url: str
 
@@ -27,7 +29,7 @@ class Settings(BaseSettings):
     refresh_cookie_name: str = "sansa_refresh"
     csrf_cookie_name: str = "sansa_csrf"
     cookie_domain: str | None = None
-    cookie_secure: bool = False          # True in prod
+    cookie_secure: bool = False
     cookie_samesite: Literal["lax", "strict", "none"] = "lax"
 
     # CSRF header name expected on state-changing requests
@@ -42,6 +44,30 @@ class Settings(BaseSettings):
     def _check_jwt_secret_length(self) -> "Settings":
         if len(self.jwt_secret.encode("utf-8")) < 32:
             raise ValueError("JWT_SECRET must be at least 32 bytes")
+        if (
+            self.environment.lower() in {"prod", "production"}
+            and not self.cookie_secure
+        ):
+            raise ValueError(
+                "COOKIE_SECURE must be true in production environments"
+            )
+        if self.redis_url == "":
+            self.redis_url = None
+        if self.redis_url is not None:
+            redis_parts = urlsplit(self.redis_url)
+            if redis_parts.scheme not in {"redis", "rediss"} or not redis_parts.netloc:
+                raise ValueError("REDIS_URL must include a redis:// or rediss:// host")
+        if (
+            self.environment.lower() in {"prod", "production"}
+            and self.redis_url is None
+        ):
+            raise ValueError("REDIS_URL is required in production environments")
+        if self.sql_row_limit < 1 or self.sql_timeout_seconds < 1:
+            raise ValueError("SQL row limit and timeout must be positive")
+        if self.sql_stream_batch_size < 1:
+            raise ValueError("SQL_STREAM_BATCH_SIZE must be positive")
+        if self.retrieval_sql_candidate_limit < 1:
+            raise ValueError("RETRIEVAL_SQL_CANDIDATE_LIMIT must be positive")
         return self
 
     # Storage
@@ -61,6 +87,7 @@ class Settings(BaseSettings):
     # SQL connector
     sql_row_limit: int = 10000
     sql_timeout_seconds: int = 30
+    sql_stream_batch_size: int = 500
 
     # HTTP connector
     http_timeout_seconds: int = 30
@@ -79,6 +106,7 @@ class Settings(BaseSettings):
     retrieval_vector_weight: float = 0.5
     retrieval_keyword_weight: float = 0.3
     retrieval_sql_weight: float = 0.2
+    retrieval_sql_candidate_limit: int = 2000
 
     # Chunking
     chunk_target_tokens: int = 400

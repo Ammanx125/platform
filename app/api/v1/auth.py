@@ -75,7 +75,10 @@ async def login(
 ) -> dict[str, str]:
     try:
         _user, access, refresh = await auth_service.login(
-            db, email=body.email, password=body.password
+            db,
+            email=body.email,
+            password=body.password,
+            tenant_slug=body.tenant_slug,
         )
     except AuthError as exc:
         raise HTTPException(

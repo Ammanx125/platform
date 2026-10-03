@@ -8,10 +8,12 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -167,7 +169,13 @@ class StagedRow(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
 
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    search_text: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
         UniqueConstraint("job_id", "row_number", name="uq_staged_rows_job_row"),
+        Index(
+            "ix_staged_rows_search_text_gin",
+            func.to_tsvector("simple", search_text),
+            postgresql_using="gin",
+        ),
     )

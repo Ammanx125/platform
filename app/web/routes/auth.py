@@ -30,10 +30,14 @@ async def login_submit(
     email: Annotated[str, Form()],
     password: Annotated[str, Form()],
     db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_slug: Annotated[str | None, Form()] = None,
 ):
     try:
         _user, access, refresh = await auth_service.login(
-            db, email=email, password=password
+            db,
+            email=email,
+            password=password,
+            tenant_slug=tenant_slug,
         )
     except AuthError as exc:
         return templates.TemplateResponse(

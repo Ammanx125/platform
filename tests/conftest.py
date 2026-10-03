@@ -72,6 +72,8 @@ async def two_tenants() -> AsyncGenerator[dict]:
         yield {
             "tenant_a": ta.id,
             "tenant_b": tb.id,
+            "tenant_slug_a": ta.slug,
+            "tenant_slug_b": tb.slug,
             "user_a": ua.id,
             "user_b": ub.id,
             "email_a": ua.email,

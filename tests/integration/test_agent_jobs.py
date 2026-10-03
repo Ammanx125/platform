@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import hashlib
 import io
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
+from app.db.models.agent import PendingFileUpload
 from app.db.models.dataset import DataSource, IngestionJob
 from app.db.session import SessionLocal
 from app.services.agents.classifier import classify_observations
@@ -34,7 +36,11 @@ async def _enroll_and_register(client: AsyncClient, tenant_env: dict) -> tuple[s
 
     r = await client.post(
         "/api/v1/datasets",
-        json={"name": "Agent src", "source_type": "agent", "config": {}},
+        json={
+            "name": f"Agent src {uuid4().hex}",
+            "source_type": "agent",
+            "config": {},
+        },
         headers=_csrf(client),
     )
     assert r.status_code == 201, r.text
@@ -126,7 +132,52 @@ async def test_classification_and_ingest_flow(
     assert job["job_type"] == "upload_file"
     assert job["params"]["path"] == "reports/purchases.csv"
 
-    # Agent uploads content.
+    # Another agent in the same tenant cannot fulfill this agent's upload.
+    other_agent_id, other_credential, _ = await _enroll_and_register(
+        client, two_tenants
+    )
+    r = await client.post(
+        f"/api/v1/agents/{other_agent_id}/upload/{csv_hash}",
+        files={"file": ("upload.bin", io.BytesIO(csv_content), "text/csv")},
+        headers={"Authorization": f"Bearer {other_credential}"},
+    )
+    assert r.status_code == 404
+
+    # A mismatched payload is rejected before it can be stored or delivered.
+    r = await client.post(
+        f"/api/v1/agents/{agent_id}/upload/{csv_hash}",
+        files={
+            "file": (
+                "upload.bin",
+                io.BytesIO(csv_content + b"tampered"),
+                "text/csv",
+            )
+        },
+        headers=auth,
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "content hash mismatch"
+
+    async with SessionLocal() as db:
+        pending_upload = (
+            await db.execute(
+                select(PendingFileUpload).where(
+                    PendingFileUpload.expected_hash == csv_hash,
+                    PendingFileUpload.tenant_id == two_tenants["tenant_a"],
+                )
+            )
+        ).scalar_one()
+        ingestion_job = (
+            await db.execute(
+                select(IngestionJob).where(
+                    IngestionJob.id == pending_upload.job_id
+                )
+            )
+        ).scalar_one()
+        assert pending_upload.status == "pending"
+        assert ingestion_job.storage_key is None
+
+    # The owning agent can still upload the expected bytes.
     r = await client.post(
         f"/api/v1/agents/{agent_id}/upload/{csv_hash}",
         files={"file": ("upload.bin", io.BytesIO(csv_content), "text/csv")},

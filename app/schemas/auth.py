@@ -20,6 +20,15 @@ def _validate_password(v: str) -> str:
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1)
+    tenant_slug: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        description=(
+            "Workspace identity. Required when an email exists in multiple "
+            "tenants; new clients should always provide it."
+        ),
+    )
 
 
 class CreateUserRequest(BaseModel):

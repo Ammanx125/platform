@@ -24,8 +24,10 @@ class LocalStorage:
     def _path(self, key: str) -> Path:
         # Reject anything that could escape the root.
         candidate = (self.root / key).resolve()
-        if not str(candidate).startswith(str(self.root)):
-            raise ValueError("storage key escapes root")
+        try:
+            candidate.relative_to(self.root)
+        except ValueError as exc:
+            raise ValueError("storage key escapes root") from exc
         return candidate
 
     async def put(self, *, key: str, content: bytes) -> None:

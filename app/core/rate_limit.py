@@ -1,24 +1,22 @@
 # app/core/rate_limit.py
 """
-Rate limiting via slowapi.
-
-Backend is in-process memory by default. This is fine for a single-worker
-dev setup but DOES NOT work across multiple workers or hosts — each worker
-has its own counter. Before production, swap to a Redis backend:
-
-    from slowapi import Limiter
-    from slowapi.util import get_remote_address
-    limiter = Limiter(key_func=get_remote_address, storage_uri="redis://...")
-
-See slowapi docs. The decorator call sites don't change.
+Rate limiting via slowapi, backed by Redis when configured.
 """
 from __future__ import annotations
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=[],           # opt-in per-route, not global
-    headers_enabled=True,        # send X-RateLimit-* headers on responses
-)
+from app.core.config import settings
+
+
+def _create_limiter(redis_url: str | None) -> Limiter:
+    return Limiter(
+        key_func=get_remote_address,
+        default_limits=[],
+        headers_enabled=True,
+        storage_uri=redis_url or "memory://",
+    )
+
+
+limiter = _create_limiter(settings.redis_url)

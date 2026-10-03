@@ -8,7 +8,7 @@ Core loop: **Data → Understanding → Decision → Action.**
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.13+
 - Docker Desktop (for Postgres + pgvector)
 - PowerShell 7+ recommended on Windows (for `-Form` in test scripts)
 
@@ -17,3 +17,19 @@ Core loop: **Data → Understanding → Decision → Action.**
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+```
+
+## Redis rate limiting
+
+Set `REDIS_URL` to a shared Redis instance to share route limits across workers.
+Development can omit it and uses an in-process limiter; production requires
+`REDIS_URL` and verifies Redis connectivity during startup.
+
+## SQL data sources
+
+SQL sources use `credential_ref` values resolved from `SANSA_SECRET_<REF>`.
+Credentials must point to PostgreSQL (`postgresql+asyncpg`) or to SQLite with
+`mode=ro&uri=true`; PostgreSQL connections run in read-only transactions.
+Use a database account with read-only permissions. Queries must be a single
+`SELECT`; ingestion applies a configured row cap, statement timeout, and
+streamed batches.

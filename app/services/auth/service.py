@@ -20,9 +20,20 @@ from app.db.models.tenant import Tenant
 from app.db.models.user import User
 
 
-async def _load_user_by_email(db: AsyncSession, email: str) -> User | None:
-    result = await db.execute(select(User).where(User.email == email))
-    return result.scalar_one_or_none()
+async def _load_login_user(
+    db: AsyncSession, *, email: str, tenant_slug: str | None
+) -> User | None:
+    stmt = select(User).where(User.email == email)
+    if tenant_slug is not None:
+        stmt = stmt.join(Tenant, Tenant.id == User.tenant_id).where(
+            Tenant.slug == tenant_slug
+        )
+        return (await db.execute(stmt)).scalar_one_or_none()
+
+    # Backward compatibility for clients that have not yet added the
+    # tenant slug. Never guess when the email exists in multiple tenants.
+    users = list((await db.execute(stmt.limit(2))).scalars().all())
+    return users[0] if len(users) == 1 else None
 
 
 async def _issue_refresh_token(
@@ -45,9 +56,17 @@ async def _issue_refresh_token(
     return raw, row
 
 
-async def login(db: AsyncSession, *, email: str, password: str) -> tuple[User, str, str]:
+async def login(
+    db: AsyncSession,
+    *,
+    email: str,
+    password: str,
+    tenant_slug: str | None = None,
+) -> tuple[User, str, str]:
     """Returns (user, access_token, raw_refresh_token)."""
-    user = await _load_user_by_email(db, email)
+    user = await _load_login_user(
+        db, email=email, tenant_slug=tenant_slug
+    )
     if user is None or not verify_password(password, user.password_hash):
         # Same error for "no such user" and "wrong password" — no enumeration.
         raise AuthError("invalid credentials")
@@ -75,7 +94,9 @@ async def refresh(db: AsyncSession, *, raw_refresh_token: str) -> tuple[User, st
     token_hash = hash_refresh_token(raw_refresh_token)
     row = (
         await db.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            select(RefreshToken)
+            .where(RefreshToken.token_hash == token_hash)
+            .with_for_update()
         )
     ).scalar_one_or_none()
 

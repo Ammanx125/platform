@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import io
 import random
 import sys
 import time
@@ -37,7 +36,6 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-
 
 # ---------- logging ----------
 
@@ -183,10 +181,16 @@ class SansaAPI:
             return {}
         return {"X-CSRF-Token": self._csrf}
 
-    def login(self, *, email: str, password: str) -> dict:
+    def login(
+        self, *, email: str, password: str, tenant_slug: str | None = None
+    ) -> dict:
         r = self.client.post(
             "/api/v1/auth/login",
-            json={"email": email, "password": password},
+            json={
+                "email": email,
+                "password": password,
+                "tenant_slug": tenant_slug,
+            },
         )
         r.raise_for_status()
         self._capture_csrf()
@@ -344,6 +348,7 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--email", default="admin@demo.com")
     parser.add_argument("--password", default="Sansa2026")
+    parser.add_argument("--tenant-slug")
     parser.add_argument(
         "--data-dir", default="data/demo", type=Path,
         help="Where to write generated sample data."
@@ -356,7 +361,11 @@ def main() -> int:
     # ---- 1. Login ----
     log.step_header("Login")
     try:
-        me = api.login(email=args.email, password=args.password)
+        me = api.login(
+            email=args.email,
+            password=args.password,
+            tenant_slug=args.tenant_slug,
+        )
         log.ok(f"logged in as {me['email']} (tenant {me['tenant_id'][:8]}…)")
         result.record("login", True)
     except Exception as exc:

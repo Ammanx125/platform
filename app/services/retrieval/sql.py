@@ -16,9 +16,10 @@ from __future__ import annotations
 import re
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.models.dataset import DataSource, StagedRow
 from app.services.retrieval.base import (
     RetrievalFilters,
@@ -54,12 +55,16 @@ class SQLRetriever:
                 filters={},
             )
 
+        tsquery = " | ".join(f"{token}:*" for token in sorted(query_tokens))
+        tsvector = func.to_tsvector("simple", StagedRow.search_text)
+        ts_query = func.to_tsquery("simple", tsquery)
         stmt = (
             select(StagedRow, DataSource.name.label("source_name"))
             .join(DataSource, DataSource.id == StagedRow.source_id)
             .where(
                 StagedRow.tenant_id == tenant_id,
                 DataSource.tenant_id == tenant_id,
+                tsvector.op("@@")(ts_query),
             )
         )
 
@@ -67,11 +72,11 @@ class SQLRetriever:
         if f.source_ids:
             stmt = stmt.where(StagedRow.source_id.in_(f.source_ids))
 
-        # Pull a bounded candidate set. Full-table scan on StagedRow is fine
-        # for Step 7a where test data is small. A production version would
-        # use a GIN index on raw_data or push down to a materialized
-        # canonical table (Step 6+). See NOTE below.
-        stmt = stmt.limit(2000)
+        rank = func.ts_rank_cd(tsvector, ts_query)
+        stmt = (
+            stmt.order_by(desc(rank))
+            .limit(settings.retrieval_sql_candidate_limit)
+        )
 
         rows = (await db.execute(stmt)).all()
 

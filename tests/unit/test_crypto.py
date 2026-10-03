@@ -14,6 +14,25 @@ def test_jwt_secret_must_be_at_least_32_bytes() -> None:
         )
 
 
+def test_production_requires_secure_cookies() -> None:
+    with pytest.raises(ValueError, match="COOKIE_SECURE must be true"):
+        Settings.model_validate({
+            "environment": "production",
+            "database_url": "postgresql://localhost:5432/db",
+            "jwt_secret": "x" * 32,
+            "cookie_secure": False,
+        })
+
+    settings = Settings.model_validate({
+        "environment": "production",
+        "database_url": "postgresql://localhost:5432/db",
+        "jwt_secret": "x" * 32,
+        "cookie_secure": True,
+        "redis_url": "redis://localhost:6379/0",
+    })
+    assert settings.cookie_secure
+
+
 def test_encrypt_decrypt_round_trip() -> None:
     plaintext = "shhh-this-is-a-secret"
     ciphertext = crypto.encrypt(plaintext)

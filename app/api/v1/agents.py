@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentAgent, CurrentTenantId, require_permission
 from app.core.config import settings
-from app.db.models.agent import PendingFileUpload
+from app.db.models.agent import AgentJob, PendingFileUpload
 from app.db.models.dataset import IngestionJob
 from app.db.models.user import User
 from app.db.session import get_db
@@ -260,6 +260,24 @@ async def agent_upload_content(
                 PendingFileUpload.expected_hash == content_hash,
                 PendingFileUpload.status == "pending",
             )
+            .join(
+                AgentJob,
+                PendingFileUpload.agent_job_id == AgentJob.id,
+            )
+            .join(
+                IngestionJob,
+                PendingFileUpload.job_id == IngestionJob.id,
+            )
+            .where(
+                AgentJob.tenant_id == agent.tenant_id,
+                AgentJob.agent_id == agent.id,
+                AgentJob.job_type == "upload_file",
+                AgentJob.status == "in_progress",
+                IngestionJob.tenant_id == agent.tenant_id,
+                IngestionJob.source_id == agent.source_id,
+            )
+            .order_by(PendingFileUpload.created_at.asc())
+            .limit(1)
         )
     ).scalar_one_or_none()
     if pending is None:
@@ -273,12 +291,21 @@ async def agent_upload_content(
         raise HTTPException(status_code=413, detail="file too large")
 
     actual_hash = hashlib.sha256(content).hexdigest()
+    if actual_hash != content_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="content hash mismatch",
+        )
 
     # Store the content. Use the ingestion_job's storage key so run_job
     # finds it.
     ingestion_job = (
         await db.execute(
-            select(IngestionJob).where(IngestionJob.id == pending.job_id)
+            select(IngestionJob).where(
+                IngestionJob.id == pending.job_id,
+                IngestionJob.tenant_id == agent.tenant_id,
+                IngestionJob.source_id == agent.source_id,
+            )
         )
     ).scalar_one_or_none()
     if ingestion_job is None:

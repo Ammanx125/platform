@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -93,6 +93,7 @@ class SQLSourceConfig(BaseModel):
     """
     credential_ref: str
     query: str
-    row_limit: int = 10000
-    timeout_seconds: int = 30
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    row_limit: int = Field(default=10000, ge=1)
+    timeout_seconds: int = Field(default=30, ge=1)
     

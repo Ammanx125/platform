@@ -116,9 +116,14 @@ async def concurrency_env() -> AsyncGenerator[dict]:
         env = {
             "tenant_a": tenant_a_id,
             "tenant_b": tenant_b_id,
+            "tenant_slug_a": ta.slug,
+            "tenant_slug_b": tb.slug,
             "user_a": user_a_id,
             "user_a2": user_a2_id,
             "user_b": user_b_id,
+            "email_a": email_a,
+            "email_b": email_b,
+            "password": password,
             "system_user_a": system_user_a_id,
         }
 

@@ -53,6 +53,10 @@
 
           <form method="post" action="/login" class="login-form">
             <div class="field">
+              <label class="field-label" for="tenant_slug">Workspace</label>
+              <input class="input" type="text" id="tenant_slug" name="tenant_slug" autocomplete="organization" required>
+            </div>
+            <div class="field">
               <label class="field-label" for="email">Email address</label>
               <input class="input" type="email" id="email" name="email" autocomplete="username" required autofocus>
             </div>

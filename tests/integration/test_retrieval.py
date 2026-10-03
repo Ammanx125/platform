@@ -2,6 +2,11 @@
 import pytest
 from httpx import AsyncClient
 
+from app.core.config import settings
+from app.db.models.dataset import DataSource, IngestionJob, StagedRow
+from app.db.session import SessionLocal
+from app.services.retrieval.sql import SQLRetriever
+
 
 def _csrf(client: AsyncClient) -> dict[str, str]:
     t = client.cookies.get("sansa_csrf")
@@ -105,6 +110,73 @@ async def test_tenant_isolation(
     )
     assert r.status_code == 200
     assert r.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_sql_retrieval_uses_bounded_tenant_scoped_candidates(
+    two_tenants: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "retrieval_sql_candidate_limit", 1)
+    async with SessionLocal() as db:
+        source_a = DataSource(
+            tenant_id=two_tenants["tenant_a"],
+            name="SQL source A",
+            source_type="sql",
+            config={},
+        )
+        source_b = DataSource(
+            tenant_id=two_tenants["tenant_b"],
+            name="SQL source B",
+            source_type="sql",
+            config={},
+        )
+        db.add_all([source_a, source_b])
+        await db.flush()
+        job_a = IngestionJob(
+            tenant_id=two_tenants["tenant_a"], source_id=source_a.id
+        )
+        job_b = IngestionJob(
+            tenant_id=two_tenants["tenant_b"], source_id=source_b.id
+        )
+        db.add_all([job_a, job_b])
+        await db.flush()
+        db.add_all([
+            StagedRow(
+                tenant_id=two_tenants["tenant_a"],
+                source_id=source_a.id,
+                job_id=job_a.id,
+                row_number=1,
+                raw_data={"supplier": "Acme Motors"},
+                search_text='{"supplier": "Acme Motors"}',
+            ),
+            StagedRow(
+                tenant_id=two_tenants["tenant_a"],
+                source_id=source_a.id,
+                job_id=job_a.id,
+                row_number=2,
+                raw_data={"supplier": "Acme Components"},
+                search_text='{"supplier": "Acme Components"}',
+            ),
+            StagedRow(
+                tenant_id=two_tenants["tenant_b"],
+                source_id=source_b.id,
+                job_id=job_b.id,
+                row_number=1,
+                raw_data={"supplier": "Acme Confidential"},
+                search_text='{"supplier": "Acme Confidential"}',
+            ),
+        ])
+        await db.flush()
+
+        result = await SQLRetriever().retrieve(
+            db=db,
+            tenant_id=two_tenants["tenant_a"],
+            query="acme",
+            top_k=5,
+        )
+
+        assert len(result.items) == 1
+        assert result.items[0].metadata["source_id"] == str(source_a.id)
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import uuid
 from datetime import UTC, datetime
 
@@ -256,6 +257,12 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
                 source_id=source.id,
                 row_number=parsed.row_number,
                 raw_data=parsed.data,
+                search_text=json.dumps(
+                    parsed.data,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                ),
             ))
 
         job.rows_read = len(result.rows) + len(result.errors)
