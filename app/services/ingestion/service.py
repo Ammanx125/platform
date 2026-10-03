@@ -62,6 +62,8 @@ async def _run_pdf_job(
     job: IngestionJob,
     source: DataSource,
     lineage_row: IngestionLineage,
+    storage_key: str | None = None,
+    original_filename: str | None = None,
 ) -> None:
     """
     PDF ingestion pipeline. Produces a Document, not StagedRows.
@@ -74,7 +76,7 @@ async def _run_pdf_job(
     from app.services.knowledge import service as knowledge_service
     from app.services.storage.local import storage
 
-    storage_key = source.config.get("storage_key")
+    storage_key = storage_key or source.config.get("storage_key")
     if not storage_key:
         raise IngestionError("pdf source has no storage_key in config")
 
@@ -90,7 +92,9 @@ async def _run_pdf_job(
 
     doc_metadata = {
         **extraction.doc_metadata,
-        "original_filename": source.config.get("original_filename"),
+        "original_filename": (
+            original_filename or source.config.get("original_filename")
+        ),
         "file_size_bytes": len(content),
     }
 
@@ -114,7 +118,9 @@ async def _run_pdf_job(
     lineage_row.source_uri = storage_key
     lineage_row.byte_size = len(content)
     lineage_row.file_hash = hash_bytes(content)
-    lineage_row.original_filename = source.config.get("original_filename")
+    lineage_row.original_filename = (
+        original_filename or source.config.get("original_filename")
+    )
 
     await db.flush()
 
@@ -158,13 +164,36 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             db.add(lineage_row)
             await db.flush()
 
-        if source.source_type == "webhook":
+        is_agent_source = source.source_type == "agent"
+        if is_agent_source:
+            if not job.storage_key:
+                raise IngestionError(
+                    "agent ingestion job has no storage_key"
+                )
+            if not job.pending_path:
+                raise IngestionError(
+                    "agent ingestion job has no pending_path"
+                )
+            ingestion_source_type = extension_to_source_type(
+                extension_of(job.pending_path)
+            )
+        else:
+            ingestion_source_type = source.source_type
+
+        if ingestion_source_type == "webhook":
             from app.services.ingestion import webhook as webhook_service
             result = await webhook_service.process_pending_deliveries(
                 db, job=job
             )
-        elif source.source_type == "pdf":
-            await _run_pdf_job(db, job=job, source=source, lineage_row=lineage_row)
+        elif ingestion_source_type == "pdf":
+            await _run_pdf_job(
+                db,
+                job=job,
+                source=source,
+                lineage_row=lineage_row,
+                storage_key=job.storage_key if is_agent_source else None,
+                original_filename=job.pending_path if is_agent_source else None,
+            )
             job.status = "succeeded"
             job.finished_at = datetime.now(UTC)
             from app.services.events import store as events_store
@@ -200,8 +229,11 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             await db.commit()
             return
         else:
-            connector = get_connector(source.source_type)
-            result = await connector.ingest(source=source)
+            connector = get_connector(ingestion_source_type)
+            result = await connector.ingest(
+                source=source,
+                storage_key=job.storage_key if is_agent_source else None,
+            )
 
         # Stage rows
         for parsed in result.rows:
@@ -218,6 +250,10 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         lineage_row.errors = result.errors
         lineage_row.encoding = result.metadata.encoding
         lineage_row.delimiter = result.metadata.delimiter
+        if is_agent_source:
+            lineage_row.storage_key = job.storage_key
+            lineage_row.original_filename = job.pending_path
+            lineage_row.file_hash = job.pending_hash
 
         # Flush staged rows so the profiler can see them, then compute the
         # profile. Kept inside the try so a profiling failure fails the job.

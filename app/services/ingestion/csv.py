@@ -20,8 +20,10 @@ if TYPE_CHECKING:
 class CSVConnector:
     source_type = "csv"
 
-    async def _read_text(self, *, source: DataSource) -> str:
-        storage_key = source.config.get("storage_key")
+    async def _read_text(
+        self, *, source: DataSource, storage_key: str | None = None
+    ) -> str:
+        storage_key = storage_key or source.config.get("storage_key")
         if not storage_key:
             raise IngestionError("source has no storage_key in config")
         raw = await storage.get(key=storage_key)
@@ -54,8 +56,10 @@ class CSVConnector:
             encoding="utf-8-sig",
         )
 
-    async def ingest(self, *, source: DataSource) -> IngestionResult:
-        text = await self._read_text(source=source)
+    async def ingest(
+        self, *, source: DataSource, storage_key: str | None = None
+    ) -> IngestionResult:
+        text = await self._read_text(source=source, storage_key=storage_key)
         reader = csv.reader(io.StringIO(text))
         try:
             header = next(reader)

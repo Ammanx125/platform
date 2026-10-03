@@ -64,18 +64,46 @@ async def approve(
     """
     Approve a pending action and immediately execute it.
 
-    Sets status to 'approved', then runs the execution pipeline (which
-    flips status to 'executed', 'failed', or 'verification_failed').
-    Emits action.approved before execution.
+    The transition from pending_approval to approved is an atomic
+    conditional UPDATE. If the row is no longer pending_approval —
+    because another approver beat us, or the action was rejected, or it
+    doesn't exist for this tenant — the UPDATE returns zero rows and we
+    reject with a clear error. No read-then-write window.
     """
-    record = await _load_pending(db, action_id=action_id, tenant_id=tenant_id)
+    now = datetime.now(UTC)
 
-    if record.user_id == approver_user_id:
+    # Step 1: claim the transition atomically. We can't check "is this the
+    # proposer's own action" in the UPDATE's WHERE clause because that
+    # would require embedding the approver's identity in the SET clause.
+    # Instead we fetch the row with FOR UPDATE, verify identity, then
+    # transition. The lock prevents a concurrent approver from advancing
+    # the state while we're deciding.
+    row = (
+        await db.execute(
+            select(ActionRecord)
+            .where(
+                ActionRecord.id == action_id,
+                ActionRecord.tenant_id == tenant_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if row is None:
+        raise ApprovalError("action not found")
+    if row.status != "pending_approval":
+        raise ApprovalError(
+            f"action is in status {row.status!r}, "
+            f"expected 'pending_approval'"
+        )
+    if row.user_id == approver_user_id:
         raise ApprovalError("the proposer cannot approve their own action")
 
-    record.approved_by_user_id = approver_user_id
-    record.approved_at = datetime.now(UTC)
-    record.status = "approved"
+    # Row is locked; no concurrent approver can interleave between here
+    # and the commit that flushes this transition.
+    row.approved_by_user_id = approver_user_id
+    row.approved_at = now
+    row.status = "approved"
     await db.flush()
 
     await emit_event(
@@ -84,12 +112,12 @@ async def approve(
         event_type="action.approved",
         actor_user_id=approver_user_id,
         subject_type="action",
-        subject_id=record.id,
-        metadata={"tool_name": record.tool_name},
+        subject_id=row.id,
+        metadata={"tool_name": row.tool_name},
     )
 
-    await execute_approved(db, record=record, actor_user_id=approver_user_id)
-    return record
+    await execute_approved(db, record=row, actor_user_id=approver_user_id)
+    return row
 
 
 async def reject(
@@ -100,18 +128,29 @@ async def reject(
     rejector_user_id: uuid.UUID,
     reason: str | None = None,
 ) -> ActionRecord:
-    """
-    Reject a pending action.
+    row = (
+        await db.execute(
+            select(ActionRecord)
+            .where(
+                ActionRecord.id == action_id,
+                ActionRecord.tenant_id == tenant_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
 
-    Sets status to 'rejected' with the supplied reason. No execution.
-    """
-    record = await _load_pending(db, action_id=action_id, tenant_id=tenant_id)
-
-    if record.user_id == rejector_user_id:
+    if row is None:
+        raise ApprovalError("action not found")
+    if row.status != "pending_approval":
+        raise ApprovalError(
+            f"action is in status {row.status!r}, "
+            f"expected 'pending_approval'"
+        )
+    if row.user_id == rejector_user_id:
         raise ApprovalError("the proposer cannot reject their own action")
 
-    record.status = "rejected"
-    record.rejection_reason = reason or "rejected by approver"
+    row.status = "rejected"
+    row.rejection_reason = reason or "rejected by approver"
     await db.flush()
 
     await emit_event(
@@ -120,11 +159,11 @@ async def reject(
         event_type="action.rejected",
         actor_user_id=rejector_user_id,
         subject_type="action",
-        subject_id=record.id,
+        subject_id=row.id,
         metadata={
-            "tool_name": record.tool_name,
-            "reason": record.rejection_reason,
+            "tool_name": row.tool_name,
+            "reason": row.rejection_reason,
         },
-        message=record.rejection_reason,
+        message=row.rejection_reason,
     )
-    return record
+    return row

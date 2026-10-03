@@ -14,9 +14,9 @@ prevents a burst of events from spawning many workflow runs.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.event import Event
@@ -79,33 +79,39 @@ async def dispatch_once(db: AsyncSession, *, batch: int = 10) -> int:
             continue
 
         for trigger in matched:
-            if not _cooldown_elapsed(trigger, now):
+            claimed = await _try_claim_trigger(
+                db, trigger_id=trigger.id, now=now
+            )
+            if claimed is None:
                 continue
             try:
                 await start_workflow(
                     db,
-                    workflow_key=trigger.workflow_key,
+                    workflow_key=claimed.workflow_key,
                     tenant_id=event.tenant_id,
                     user_id=user_id,
-                    source_ids=_resolve_source_ids(trigger, event),
+                    source_ids=_resolve_source_ids(claimed, event),
                     trigger_type="event",
                     trigger_metadata={
                         "event_id": str(event.id),
                         "event_type": event.event_type,
-                        "trigger_id": str(trigger.id),
-                        **dict(trigger.trigger_params or {}),
+                        "trigger_id": str(claimed.id),
+                        **dict(claimed.trigger_params or {}),
                     },
                     decision_run_id=None,
                     run_now=True,
                 )
-                trigger.last_fired_at = now
                 started_any = True
-            except WorkflowError:
-                # A bad trigger config (workflow removed, etc) shouldn't
-                # stop other triggers.
-                continue
+            except WorkflowError as exc:
+                if event.error:
+                    event.error = f"{event.error}; {exc}"[:500]
+                else:
+                    event.error = str(exc)[:500]
             except Exception as exc:  # noqa: BLE001
-                event.error = f"trigger {trigger.id}: {exc}"[:500]
+                if event.error:
+                    event.error = f"{event.error}; {exc}"[:500]
+                else:
+                    event.error = str(exc)[:500]
 
         event.status = "dispatched" if started_any else "ignored"
         event.processed_at = now
@@ -139,10 +145,27 @@ async def _matching_triggers(
     ]
 
 
-def _cooldown_elapsed(trigger: WorkflowTrigger, now: datetime) -> bool:
-    if trigger.last_fired_at is None:
-        return True
-    return now - trigger.last_fired_at >= timedelta(seconds=trigger.cooldown_seconds)
+async def _try_claim_trigger(
+    db: AsyncSession, *, trigger_id: uuid.UUID, now: datetime
+) -> WorkflowTrigger | None:
+    """Atomically claim a trigger cooldown window if it has elapsed."""
+    stmt = (
+        update(WorkflowTrigger)
+        .where(
+            WorkflowTrigger.id == trigger_id,
+            WorkflowTrigger.enabled.is_(True),
+            or_(
+                WorkflowTrigger.last_fired_at.is_(None),
+                WorkflowTrigger.last_fired_at
+                + func.make_interval(0, 0, 0, 0, 0, 0, WorkflowTrigger.cooldown_seconds)
+                <= now,
+            ),
+        )
+        .values(last_fired_at=now)
+        .returning(WorkflowTrigger)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 def _resolve_source_ids(

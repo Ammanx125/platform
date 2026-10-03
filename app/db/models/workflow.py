@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -84,6 +85,9 @@ class WorkflowInstance(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     trigger_metadata: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict
     )
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, index=True
+    )
     decision_run_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("decision_runs.id", ondelete="SET NULL"),
@@ -115,6 +119,13 @@ class WorkflowInstance(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
 
     __table_args__ = (
         Index("ix_workflow_instances_tenant_status", "tenant_id", "status"),
+        Index(
+            "ix_workflow_instances_idempotency",
+            "tenant_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
 class WorkflowTrigger(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):

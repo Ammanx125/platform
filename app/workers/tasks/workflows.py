@@ -26,7 +26,7 @@ from app.db.models.action import ActionRecord
 from app.db.models.user import User
 from app.db.models.workflow import WorkflowInstance
 from app.services.workflows.base import WorkflowContext
-from app.services.workflows.engine import resume_instance, run_instance
+from app.services.workflows.engine import WorkflowError, resume_instance, run_instance
 
 
 async def _workflow_user_id(
@@ -76,10 +76,9 @@ async def run_pending_workflows_once(db: AsyncSession) -> int:
 
 
 async def run_waiting_workflows_once(db: AsyncSession) -> int:
-    # Find a waiting_action_approval instance whose action is terminal.
     terminal = {"executed", "failed", "verification_failed", "rejected"}
     stmt = (
-        select(WorkflowInstance, ActionRecord)
+        select(WorkflowInstance)
         .join(ActionRecord, ActionRecord.id == WorkflowInstance.pending_action_id)
         .where(
             WorkflowInstance.status == "waiting_action_approval",
@@ -89,10 +88,9 @@ async def run_waiting_workflows_once(db: AsyncSession) -> int:
         .limit(1)
         .with_for_update(skip_locked=True)
     )
-    row = (await db.execute(stmt)).first()
-    if row is None:
+    instance = (await db.execute(stmt)).scalar_one_or_none()
+    if instance is None:
         return 0
-    instance, _action = row
 
     user_id = await _workflow_user_id(db, instance)
     if user_id is None:
@@ -101,9 +99,10 @@ async def run_waiting_workflows_once(db: AsyncSession) -> int:
         await db.flush()
         return 1
 
-    await resume_instance(
-        db,
-        instance=instance,
-        user_id=user_id,
-    )
+    try:
+        await resume_instance(db, instance=instance, user_id=user_id)
+    except WorkflowError:
+        # The instance's state was changed by someone else between our
+        # SELECT and our resume. That's fine; another actor is handling it.
+        return 0
     return 1

@@ -30,5 +30,8 @@ class SQLConnector:
 	async def inspect(self, *, source: DataSource) -> SourceMetadata:
 		raise IngestionError("SQL ingestion is not implemented")
 
-	async def ingest(self, *, source: DataSource) -> IngestionResult:
+	async def ingest(
+		self, *, source: DataSource, storage_key: str | None = None
+	) -> IngestionResult:
+		del storage_key
 		raise IngestionError("SQL ingestion is not implemented")

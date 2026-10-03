@@ -17,10 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentTenantId, require_permission
 from app.core.config import settings
+from app.db.models.agent import Agent
 from app.db.models.dataset import DataSource, IngestionJob
 from app.db.models.understanding import DataProfile
 from app.db.models.user import User
 from app.db.session import get_db
+from app.schemas.agent import AgentIngestResponse, ClassificationRead
 from app.schemas.dataset import (
     DataSourceCreate,
     DataSourceRead,
@@ -29,6 +31,8 @@ from app.schemas.dataset import (
     WebhookSourceCreated,
 )
 from app.schemas.understanding import DataProfileRead
+from app.services.agents import classifier as agent_classifier
+from app.services.agents import jobs as agent_jobs_service
 from app.services.ingestion import service as ingestion_service
 from app.services.ingestion import webhook as webhook_service
 from app.services.ingestion.base import IngestionError
@@ -350,7 +354,7 @@ async def recompute_job_profile(
 
 @router.post(
     "/{dataset_id}/ingest",
-    response_model=IngestionJobRead,
+    response_model=IngestionJobRead | AgentIngestResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def trigger_ingest(
@@ -358,7 +362,7 @@ async def trigger_ingest(
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     _user: Annotated[User, Depends(require_permission("dataset:write"))],
-) -> IngestionJob:
+) -> IngestionJob | AgentIngestResponse:
     """
     Enqueue an ingestion for an existing pull source (sql, http).
 
@@ -379,6 +383,11 @@ async def trigger_ingest(
     ).scalar_one_or_none()
     if source is None:
         raise HTTPException(status_code=404, detail="dataset not found")
+
+    if source.source_type == "agent":
+        return await _trigger_agent_ingest(
+            dataset_id=dataset_id, db=db, tenant_id=tenant_id, source=source
+        )
 
     if source.source_type in ("csv", "excel", "pdf"):
         raise HTTPException(
@@ -401,3 +410,102 @@ async def trigger_ingest(
     await db.commit()
     await db.refresh(job)
     return job
+
+
+@router.get(
+    "/{dataset_id}/observations/classification",
+    response_model=ClassificationRead,
+)
+async def classify_observations_endpoint(
+    dataset_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+) -> ClassificationRead:
+    source = (
+        await db.execute(
+            select(DataSource).where(
+                DataSource.id == dataset_id,
+                DataSource.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if source is None:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    if source.source_type != "agent":
+        raise HTTPException(
+            status_code=400,
+            detail="classification is only available for agent sources",
+        )
+    result = await agent_classifier.classify_observations(
+        db, source_id=dataset_id
+    )
+    return ClassificationRead(**result.to_dict())
+
+
+async def _trigger_agent_ingest(
+    dataset_id: uuid.UUID,
+    db: AsyncSession,
+    tenant_id: uuid.UUID,
+    source: DataSource,
+) -> AgentIngestResponse:
+    """
+    For an agent source, classify observations and create upload jobs for
+    the ready ones. If no observations are ready, returns 400 with the
+    classification report.
+
+    One ingestion job is created per ready file. Each file's job completes
+    when its content is delivered and ingested. The dashboard shows N jobs.
+    """
+    agent = (
+        await db.execute(
+            select(Agent).where(
+                Agent.source_id == dataset_id,
+                Agent.tenant_id == tenant_id,
+                Agent.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=400,
+            detail="no active agent for this source",
+        )
+
+    classification = await agent_classifier.classify_observations(
+        db, source_id=dataset_id
+    )
+    if not classification.ready:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "no files are ready to ingest",
+                "classification": classification.to_dict(),
+            },
+        )
+
+    # Create one ingestion job per ready file and one agent job per file.
+    total_agent_jobs = 0
+    ingestion_job_ids: list[uuid.UUID] = []
+    for obs in classification.ready:
+        # Create the ingestion job.
+        ingestion_job = await ingestion_service.enqueue_job(
+            db, tenant_id=tenant_id, source_id=source.id
+        )
+        ingestion_job_ids.append(ingestion_job.id)
+        ingestion_job.pending_path = obs.path
+        ingestion_job.pending_hash = obs.content_hash
+        await db.flush()
+
+        agent_jobs = await agent_jobs_service.create_upload_jobs_for_observations(
+            db, agent=agent, job=ingestion_job, observations=[obs]
+        )
+        total_agent_jobs += len(agent_jobs)
+
+    await db.commit()
+
+    return AgentIngestResponse(
+        ingestion_job_id=ingestion_job_ids[0],
+        agent_job_count=total_agent_jobs,
+        classification=classification.to_dict(),
+    )

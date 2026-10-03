@@ -1,0 +1,133 @@
+# tests/integration/test_agent_jobs.py
+"""
+Agent job lifecycle, classification, and content upload.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+
+import pytest
+from httpx import AsyncClient
+
+
+def _csrf(client: AsyncClient) -> dict[str, str]:
+    t = client.cookies.get("sansa_csrf")
+    return {"X-CSRF-Token": t} if t else {}
+
+
+async def _login(client: AsyncClient, email: str, password: str) -> None:
+    await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password}
+    )
+
+
+async def _enroll_and_register(client: AsyncClient, tenant_env: dict) -> tuple[str, str, str]:
+    """Returns (agent_id, credential, source_id)."""
+    await _login(client, tenant_env["email_a"], tenant_env["password"])
+
+    r = await client.post(
+        "/api/v1/datasets",
+        json={"name": "Agent src", "source_type": "agent", "config": {}},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 201, r.text
+    source_id = r.json()["id"]
+
+    r = await client.post(
+        "/api/v1/agents/enroll",
+        json={"name": "Test", "source_id": source_id},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 201, r.text
+    agent_id = r.json()["agent_id"]
+    token = r.json()["enrollment_token"]
+
+    r = await client.post(
+        "/api/v1/agents/register",
+        json={"enrollment_token": token, "agent_metadata": {}},
+    )
+    credential = r.json()["credential"]
+    return agent_id, credential, source_id
+
+
+@pytest.mark.asyncio
+async def test_classification_and_ingest_flow(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    agent_id, credential, source_id = await _enroll_and_register(client, two_tenants)
+    auth = {"Authorization": f"Bearer {credential}"}
+
+    csv_content = b"supplier,price\nAcme,10\nBeacon,20\n"
+    csv_hash = hashlib.sha256(csv_content).hexdigest()
+
+    # Sync a batch of observations.
+    r = await client.post(
+        f"/api/v1/agents/{agent_id}/sync",
+        json={
+            "files": [
+                {
+                    "path": "reports/purchases.csv",
+                    "content_hash": csv_hash,
+                    "byte_size": len(csv_content),
+                    "status": "new",
+                },
+                {
+                    "path": "images/logo.png",
+                    "content_hash": "0" * 64,
+                    "byte_size": 500,
+                    "status": "new",
+                },
+            ]
+        },
+        headers=auth,
+    )
+    assert r.status_code == 200
+
+    # Classification shows one ready, one unsupported.
+    r = await client.get(f"/api/v1/datasets/{source_id}/observations/classification")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["counts"]["ready"] == 1
+    assert body["counts"]["unsupported"] == 1
+
+    # Trigger ingest.
+    r = await client.post(
+        f"/api/v1/datasets/{source_id}/ingest",
+        headers=_csrf(client),
+    )
+    assert r.status_code == 202, r.text
+    assert r.json()["agent_job_count"] == 1, r.text
+
+    # Agent polls for jobs.
+    r = await client.get(f"/api/v1/agents/{agent_id}/jobs", headers=auth)
+    assert r.status_code == 200
+    jobs = r.json()
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job["job_type"] == "upload_file"
+    assert job["params"]["path"] == "reports/purchases.csv"
+
+    # Agent uploads content.
+    r = await client.post(
+        f"/api/v1/agents/{agent_id}/upload/{csv_hash}",
+        files={"file": ("upload.bin", io.BytesIO(csv_content), "text/csv")},
+        headers=auth,
+    )
+    assert r.status_code == 201, r.text
+
+    # Agent reports the job result.
+    r = await client.post(
+        f"/api/v1/agents/{agent_id}/jobs/{job['id']}/result",
+        json={"status": "completed", "result": {"actual_hash": csv_hash}},
+        headers=auth,
+    )
+    assert r.status_code == 200
+
+    # Ingestion should have run; check the job is no longer pending.
+    r = await client.get(f"/api/v1/datasets/{source_id}/jobs")
+    assert r.status_code == 200
+    jobs_resp = r.json()
+    assert len(jobs_resp) >= 1
+    # The first ingestion job should now be succeeded (or at least not pending).
+    assert any(j["status"] in ("succeeded", "running") for j in jobs_resp)

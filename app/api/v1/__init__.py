@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.actions import router as actions_router
+from app.api.v1.agents import router as agents_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.dashboard import router as dashboard_router
@@ -31,3 +32,4 @@ api_router.include_router(dashboard_router)
 api_router.include_router(workflows_router)
 api_router.include_router(tool_policies_router)
 api_router.include_router(events_router)
+api_router.include_router(agents_router)

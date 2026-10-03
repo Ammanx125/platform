@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
@@ -79,3 +80,26 @@ async def test_dispatch_ignores_event_without_system_user(db, two_tenants):
 
     assert event.status == "ignored"
     assert event.error == "no system user for tenant"
+
+
+@pytest.mark.asyncio
+async def test_trigger_cooldown_can_only_be_claimed_once(db, two_tenants):
+    trigger = WorkflowTrigger(
+        tenant_id=two_tenants["tenant_a"],
+        workflow_key="test.workflow",
+        event_type_filter=types.INGESTION_COMPLETED,
+        enabled=True,
+        cooldown_seconds=60,
+    )
+    db.add(trigger)
+    await db.flush()
+    now = datetime.now(UTC)
+
+    claimed = await dispatcher._try_claim_trigger(db, trigger_id=trigger.id, now=now)
+    second_claim = await dispatcher._try_claim_trigger(
+        db, trigger_id=trigger.id, now=now
+    )
+
+    assert claimed is not None
+    assert claimed.last_fired_at == now
+    assert second_claim is None

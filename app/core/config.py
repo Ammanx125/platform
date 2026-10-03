@@ -112,6 +112,13 @@ class Settings(BaseSettings):
     prompt_injection_score_threshold: float = 0.5
     prompt_untrusted_delimiter: bool = True
 
+    # On-prem agent
+    agent_sync_interval_seconds: int = 60
+    agent_job_poll_interval_seconds: int = 30
+    agent_max_upload_bytes: int = 200 * 1024 * 1024
+    agent_job_batch_size: int = 20
+    agent_job_in_progress_timeout_seconds: int = 300
+
 
 # BaseSettings loads required values from the environment at runtime.
 settings = Settings()  # pyright: ignore[reportCallIssue]

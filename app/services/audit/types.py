@@ -35,11 +35,18 @@ DECISION_CREATED = "decision.created"
 # --- Workflows (emitted by app/services/workflows/engine.py) ---
 WORKFLOW_COMPLETED = "workflow.completed"
 WORKFLOW_FAILED = "workflow.failed"
+WORKFLOW_APPROVED = "workflow.approved"
 WORKFLOW_REJECTED = "workflow.rejected"
 
 # --- Ingestion (emitted by app/services/ingestion/service.py) ---
 INGESTION_COMPLETED = "ingestion.completed"
 INGESTION_FAILED = "ingestion.failed"
+
+# --- Agents (emitted by app/services/agents/service.py) ---
+AGENT_ENROLLED = "agent.enrolled"
+AGENT_REGISTERED = "agent.registered"
+AGENT_FILE_DELIVERED = "agent.file.delivered"
+AGENT_JOB_COMPLETED = "agent.job.completed"
 
 
 ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
@@ -52,7 +59,12 @@ ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     DECISION_CREATED,
     WORKFLOW_COMPLETED,
     WORKFLOW_FAILED,
+    WORKFLOW_APPROVED,
     WORKFLOW_REJECTED,
     INGESTION_COMPLETED,
     INGESTION_FAILED,
+    AGENT_ENROLLED,
+    AGENT_REGISTERED,
+    AGENT_FILE_DELIVERED,
+    AGENT_JOB_COMPLETED,
 })

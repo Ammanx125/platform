@@ -29,8 +29,14 @@ def _coerce(value: Any) -> Any:
 class ExcelConnector:
     source_type = "excel"
 
-    async def _load(self, *, source: DataSource, sheet_name: str | None = None):
-        storage_key = source.config.get("storage_key")
+    async def _load(
+        self,
+        *,
+        source: DataSource,
+        sheet_name: str | None = None,
+        storage_key: str | None = None,
+    ):
+        storage_key = storage_key or source.config.get("storage_key")
         if not storage_key:
             raise IngestionError("source has no storage_key in config")
         raw = await storage.get(key=storage_key)
@@ -74,8 +80,10 @@ class ExcelConnector:
         finally:
             wb.close()
 
-    async def ingest(self, *, source: DataSource) -> IngestionResult:
-        wb, ws = await self._load(source=source)
+    async def ingest(
+        self, *, source: DataSource, storage_key: str | None = None
+    ) -> IngestionResult:
+        wb, ws = await self._load(source=source, storage_key=storage_key)
         try:
             it = ws.iter_rows(values_only=True)
             header_row = next(it, None)

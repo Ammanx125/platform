@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,13 +14,9 @@ from app.schemas.workflow import (
     WorkflowApproveRequest,
     WorkflowDefinitionRead,
     WorkflowInstanceRead,
-    WorkflowRejectRequest,
     WorkflowResumeRequest,
     WorkflowStartRequest,
 )
-from app.services.audit import service as audit_service
-from app.services.audit import types as audit_types
-from app.services.audit.service import emit as emit_event
 from app.services.workflows import engine as workflow_engine
 from app.services.workflows.registry import all_workflows
 from app.services.workflows.registry import get as get_workflow
@@ -134,154 +129,47 @@ async def get_instance(
     return WorkflowInstanceRead.model_validate(row)
 
 
-@router.post(
-    "/instances/{instance_id}/approve",
-    response_model=WorkflowInstanceRead,
-)
-async def approve_instance(
+@router.post("/instances/{instance_id}/approve", response_model=WorkflowInstanceRead)
+async def approve_instance_endpoint(
     instance_id: uuid.UUID,
     body: WorkflowApproveRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("action:approve"))],
 ) -> WorkflowInstanceRead:
-    instance = await workflow_engine.get_instance(
-        db, instance_id=instance_id, tenant_id=tenant_id
-    )
-    if instance is None:
-        raise HTTPException(status_code=404, detail="instance not found")
-    if instance.status != "waiting_workflow_approval":
-        raise HTTPException(
-            status_code=409,
-            detail=f"instance is in status {instance.status!r}, "
-                   f"expected 'waiting_workflow_approval'",
+    try:
+        instance = await workflow_engine.approve_instance(
+            db,
+            instance_id=instance_id,
+            tenant_id=tenant_id,
+            approver_user_id=user.id,
+            note=body.note,
         )
-    if instance.triggered_by_user_id == user.id:
-        raise HTTPException(
-            status_code=409,
-            detail="the triggering user cannot approve their own workflow",
-        )
-
-    await emit_event(
-        db,
-        tenant_id=tenant_id,
-        event_type="workflow.approved",
-        actor_user_id=user.id,
-        subject_type="workflow_instance",
-        subject_id=instance.id,
-        metadata={
-            "workflow_key": instance.workflow_key,
-            "note": body.note,
-        },
-    )
-    instance = await workflow_engine.resume_instance(
-        db, instance=instance, user_id=user.id
-    )
+    except workflow_engine.WorkflowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(instance)
     return WorkflowInstanceRead.model_validate(instance)
 
-
-@router.post(
-    "/instances/{instance_id}/reject",
-    response_model=WorkflowInstanceRead,
-)
-async def reject_instance(
-    instance_id: uuid.UUID,
-    body: WorkflowRejectRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    tenant_id: CurrentTenantId,
-    user: Annotated[User, Depends(require_permission("action:reject"))],
-) -> WorkflowInstanceRead:
-    instance = await workflow_engine.get_instance(
-        db, instance_id=instance_id, tenant_id=tenant_id
-    )
-    if instance is None:
-        raise HTTPException(status_code=404, detail="instance not found")
-    if instance.status != "waiting_workflow_approval":
-        raise HTTPException(
-            status_code=409,
-            detail=f"instance is in status {instance.status!r}, "
-                   f"expected 'waiting_workflow_approval'",
-        )
-    if instance.triggered_by_user_id == user.id:
-        raise HTTPException(
-            status_code=409,
-            detail="the triggering user cannot reject their own workflow",
-        )
-
-    instance.status = "rejected"
-    instance.error = body.reason or "rejected by approver"
-    instance.finished_at = datetime.now(UTC)
-    await audit_service.emit(
-        db,
-        tenant_id=tenant_id,
-        event_type=audit_types.WORKFLOW_REJECTED,
-        actor_user_id=user.id,
-        subject_type="workflow_instance",
-        subject_id=instance.id,
-        metadata={
-            "workflow_key": instance.workflow_key,
-            "reason": instance.error,
-        },
-    )
-    await db.commit()
-    await db.refresh(instance)
-    return WorkflowInstanceRead.model_validate(instance)
-
-
-@router.post(
-    "/instances/{instance_id}/resume",
-    response_model=WorkflowInstanceRead,
-)
-async def resume_instance(
+@router.post("/instances/{instance_id}/resume", response_model=WorkflowInstanceRead)
+async def resume_instance_endpoint(
     instance_id: uuid.UUID,
     body: WorkflowResumeRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("workflow:manage"))],
 ) -> WorkflowInstanceRead:
-    """
-    Manual resume. Useful when the workflow is waiting_action_approval and
-    the action has since reached a terminal state, or for testing. Step 17
-    will add a worker that resumes automatically.
-    """
-    instance = await workflow_engine.get_instance(
-        db, instance_id=instance_id, tenant_id=tenant_id
-    )
-    if instance is None:
-        raise HTTPException(status_code=404, detail="instance not found")
-    if not instance.status.startswith("waiting_"):
-        raise HTTPException(
-            status_code=409,
-            detail=f"instance is in status {instance.status!r}, not waiting",
+    try:
+        instance = await workflow_engine.get_instance(
+            db, instance_id=instance_id, tenant_id=tenant_id
         )
-    instance = await workflow_engine.resume_instance(
-        db, instance=instance, user_id=user.id, source_ids=body.source_ids
-    )
-    await db.commit()
-    await db.refresh(instance)
-    return WorkflowInstanceRead.model_validate(instance)
-
-
-@router.post(
-    "/instances/{instance_id}/cancel",
-    response_model=WorkflowInstanceRead,
-)
-async def cancel_instance(
-    instance_id: uuid.UUID,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    tenant_id: CurrentTenantId,
-    user: Annotated[User, Depends(require_permission("workflow:manage"))],
-) -> WorkflowInstanceRead:
-    instance = await workflow_engine.get_instance(
-        db, instance_id=instance_id, tenant_id=tenant_id
-    )
-    if instance is None:
-        raise HTTPException(status_code=404, detail="instance not found")
-    instance = await workflow_engine.cancel_instance(
-        db, instance=instance, reason=f"cancelled by {user.email}"
-    )
+        if instance is None:
+            raise HTTPException(status_code=404, detail="instance not found")
+        instance = await workflow_engine.resume_instance(
+            db, instance=instance, user_id=user.id, source_ids=body.source_ids
+        )
+    except workflow_engine.WorkflowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
     await db.refresh(instance)
     return WorkflowInstanceRead.model_validate(instance)

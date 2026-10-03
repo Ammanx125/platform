@@ -291,7 +291,10 @@ class HTTPConnector:
             row_count_hint=len(rows),
         )
 
-    async def ingest(self, *, source: DataSource) -> IngestionResult:
+    async def ingest(
+        self, *, source: DataSource, storage_key: str | None = None
+    ) -> IngestionResult:
+        del storage_key
         raw, fmt = await self._fetch(source=source)
         if fmt == "json":
             records = self._rows_from_json(

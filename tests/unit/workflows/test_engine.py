@@ -50,3 +50,31 @@ async def test_start_and_complete(db, two_tenants):
     )
     assert instance.status == "completed"
     assert instance.workflow_context.get("done") is True
+
+
+@pytest.mark.asyncio
+async def test_start_workflow_returns_existing_idempotency_key(db, two_tenants):
+    from app.services.workflows.registry import get as get_wf
+
+    if get_wf("test.simple") is None:
+        register(_SimpleWorkflow())
+
+    first = await start_workflow(
+        db,
+        workflow_key="test.simple",
+        tenant_id=two_tenants["tenant_a"],
+        user_id=two_tenants["user_a"],
+        run_now=False,
+        idempotency_key="test-request-123",
+    )
+    duplicate = await start_workflow(
+        db,
+        workflow_key="test.simple",
+        tenant_id=two_tenants["tenant_a"],
+        user_id=two_tenants["user_a"],
+        run_now=True,
+        idempotency_key="test-request-123",
+    )
+
+    assert duplicate.id == first.id
+    assert duplicate.status == "pending"

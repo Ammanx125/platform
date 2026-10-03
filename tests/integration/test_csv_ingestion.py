@@ -1,15 +1,17 @@
 # tests/integration/test_csv_ingestion.py
 import io
+import uuid
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.db.models.audit import AuditEvent
-from app.db.models.dataset import IngestionJob, StagedRow
+from app.db.models.dataset import DataSource, IngestionJob, StagedRow
 from app.db.session import SessionLocal
 from app.services.audit import types as audit_types
 from app.services.ingestion.service import run_job
+from app.services.storage.local import storage
 
 CSV = b"supplier,product,qty,price\nAcme,Bolt,100,0.42\nBeacon,Nut,200,0.18\n"
 
@@ -70,3 +72,58 @@ async def test_csv_upload_and_run(client: AsyncClient, two_tenants: dict) -> Non
         staged = (await db.execute(select(StagedRow).where(StagedRow.job_id == job_id))).scalars().all()
         assert len(staged) == 2
         assert staged[0].raw_data["supplier"] in ("Acme", "Beacon")
+
+
+@pytest.mark.asyncio
+async def test_agent_csv_ingestion_uses_job_storage_key(
+    two_tenants: dict,
+) -> None:
+    tenant_id = two_tenants["tenant_a"]
+    storage_key = f"{tenant_id}/{uuid.uuid4()}.csv"
+    incorrect_source_key = f"{tenant_id}/{uuid.uuid4()}.csv"
+
+    async with SessionLocal() as db:
+        source = DataSource(
+            tenant_id=tenant_id,
+            name=f"Agent CSV {uuid.uuid4()}",
+            source_type="agent",
+            config={"storage_key": incorrect_source_key},
+        )
+        db.add(source)
+        await db.flush()
+
+        job = IngestionJob(
+            tenant_id=tenant_id,
+            source_id=source.id,
+            storage_key=storage_key,
+            pending_path="reports/agent.csv",
+            pending_hash="a" * 64,
+        )
+        db.add(job)
+        await db.commit()
+        job_id = job.id
+
+    await storage.put(key=storage_key, content=CSV)
+    try:
+        async with SessionLocal() as db:
+            await run_job(db, job_id=job_id)
+
+        async with SessionLocal() as db:
+            job = (
+                await db.execute(
+                    select(IngestionJob).where(IngestionJob.id == job_id)
+                )
+            ).scalar_one()
+            assert job.status == "succeeded"
+            staged = (
+                await db.execute(
+                    select(StagedRow).where(StagedRow.job_id == job_id)
+                )
+            ).scalars().all()
+            assert len(staged) == 2
+            assert {row.raw_data["supplier"] for row in staged} == {
+                "Acme",
+                "Beacon",
+            }
+    finally:
+        await storage.delete(key=storage_key)

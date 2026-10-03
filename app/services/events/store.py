@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.event import Event
@@ -43,26 +44,18 @@ async def record_event(
     """
     Record one event. Returns (event, created).
 
-    created is False when a deduplicated event already existed; the returned
-    Event is the existing one.
+    Concurrency: when dedup_key is set, the insert uses ON CONFLICT DO
+    NOTHING against the (tenant_id, dedup_key) unique constraint. If
+    another request inserted the same key first, the INSERT returns no
+    rows; we then SELECT the existing row and return it with created=False.
+
+    This is atomic at the DB level. There is no read-then-write window.
     """
     if actor_kind not in _ALLOWED_ACTOR_KINDS:
         raise ValueError(
             f"actor_kind must be one of {sorted(_ALLOWED_ACTOR_KINDS)}, "
             f"got {actor_kind!r}"
         )
-
-    if dedup_key is not None:
-        existing = (
-            await db.execute(
-                select(Event).where(
-                    Event.tenant_id == tenant_id,
-                    Event.dedup_key == dedup_key,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return existing, False
 
     now = datetime.now(UTC)
     event = Event(
@@ -77,9 +70,48 @@ async def record_event(
         payload=redact_dict(dict(payload or {})),
         status="recorded",
     )
-    db.add(event)
-    await db.flush()
-    return event, True
+
+    if dedup_key is None:
+        db.add(event)
+        await db.flush()
+        return event, True
+
+    # Dedup-keyed insert: rely on the unique constraint.
+    stmt = (
+        pg_insert(Event)
+        .values(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            event_type=event_type,
+            source_id=source_id,
+            user_id=user_id,
+            actor_kind=actor_kind,
+            occurred_at=event.occurred_at,
+            received_at=event.received_at,
+            dedup_key=dedup_key,
+            payload=event.payload,
+            status="recorded",
+        )
+        .on_conflict_do_nothing(
+            index_elements=["tenant_id", "dedup_key"]
+        )
+        .returning(Event)
+    )
+    result = await db.execute(stmt)
+    inserted = result.scalar_one_or_none()
+    if inserted is not None:
+        return inserted, True
+
+    # Conflict: another request inserted the same (tenant, dedup_key).
+    existing = (
+        await db.execute(
+            select(Event).where(
+                Event.tenant_id == tenant_id,
+                Event.dedup_key == dedup_key,
+            )
+        )
+    ).scalar_one()
+    return existing, False
 
 
 async def list_events(

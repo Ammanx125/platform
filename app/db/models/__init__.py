@@ -1,5 +1,6 @@
 # app/db/models/__init__.py
 from app.db.models.action import ActionRecord
+from app.db.models.agent import Agent, AgentJob, PendingFileUpload
 from app.db.models.analytics import (
     Anomaly,
     AnomalyDetectorDefinition,
@@ -64,4 +65,7 @@ __all__ = [
     "TenantToolPolicy",
     "WorkflowInstance",
     "Event",
+    "Agent",
+    "AgentJob",
+    "PendingFileUpload",
 ]

@@ -25,7 +25,7 @@ class DataSource(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     A registered data source belonging to one tenant.
 
     source_type is one of: 'csv', 'excel' (Step 4a);
-    'sql', 'http', 'webhook' (Step 4b).
+    'sql', 'http', 'webhook' (Step 4b); 'agent' (on-prem file source).
 
     config holds connector-specific settings (SQL URL ref, HTTP endpoint,
     auth reference id, etc). Never store raw credentials here — store a
@@ -71,6 +71,10 @@ class IngestionJob(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         nullable=False,
         index=True,
     )
+
+    storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    pending_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    pending_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="pending", index=True

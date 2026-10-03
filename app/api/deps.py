@@ -12,8 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import AuthError
 from app.core.security import decode_access_token
+from app.db.models.agent import Agent as DBAgent
 from app.db.models.user import User
 from app.db.session import get_db
+from app.services.agents import service as agents_service
+from app.services.agents.service import AgentError
 
 
 async def get_current_user(
@@ -83,3 +86,31 @@ def require_csrf(
     """Double-submit CSRF check. Both must be present and equal."""
     if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="csrf check failed")
+
+
+async def get_current_agent(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> DBAgent:
+    """
+    Bearer-token authentication for agent endpoints.
+
+    Expects `Authorization: Bearer <credential>`. Looks up the agent by
+    credential hash and returns the Agent row. Raises 401 on any failure.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="missing agent credential",
+        )
+    credential = authorization[7:].strip()
+    try:
+        return await agents_service.authenticate_agent(db, credential=credential)
+    except AgentError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        ) from exc
+
+
+CurrentAgent = Annotated[DBAgent, Depends(get_current_agent)]

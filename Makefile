@@ -17,16 +17,25 @@ db-reset:
 	docker compose -f docker-compose.dev.yml down -v
 	docker compose -f docker-compose.dev.yml up -d
 
+PYTHON := python
+ifneq ($(wildcard .venv/Scripts/python.exe),)
+PYTHON := .venv/Scripts/python.exe
+else ifneq ($(wildcard .venv/bin/python),)
+PYTHON := .venv/bin/python
+endif
+
 migrate:
-	alembic upgrade head
+	$(PYTHON) -m alembic upgrade head
 
 revision:
-	alembic revision --autogenerate -m "$(m)"
+	$(PYTHON) -m alembic revision --autogenerate -m "$(m)"
 
 downgrade:
-	alembic downgrade -1
+	$(PYTHON) -m alembic downgrade -1
+
 dev:
-	uvicorn app.main:app --reload
+	$(PYTHON) -m uvicorn app.main:app --reload
+
 install:
 	pip install -e .
 
@@ -44,3 +53,6 @@ typecheck:
 
 test:
 	pytest -q
+
+test-concurrency:
+	pytest -q -m concurrency

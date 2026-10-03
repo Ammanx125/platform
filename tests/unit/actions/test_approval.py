@@ -75,6 +75,33 @@ async def test_cannot_approve_non_pending(db, two_tenants) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cannot_reject_own_action(db, two_tenants) -> None:
+    from datetime import UTC, datetime
+
+    from app.db.models.action import ActionRecord
+
+    record = ActionRecord(
+        tenant_id=two_tenants["tenant_a"],
+        user_id=two_tenants["user_a"],
+        tool_name="generate_report",
+        arguments={},
+        status="pending_approval",
+        proposed_at=datetime.now(UTC),
+    )
+    db.add(record)
+    await db.flush()
+
+    with pytest.raises(ApprovalError, match="cannot reject their own action"):
+        await approval_service.reject(
+            db,
+            action_id=record.id,
+            tenant_id=two_tenants["tenant_a"],
+            rejector_user_id=two_tenants["user_a"],
+            reason="not appropriate",
+        )
+
+
+@pytest.mark.asyncio
 async def test_reject_sets_reason(db, two_tenants) -> None:
     from datetime import UTC, datetime
 

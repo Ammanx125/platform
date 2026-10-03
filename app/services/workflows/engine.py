@@ -19,7 +19,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.action import ActionRecord
@@ -42,6 +43,120 @@ from app.services.workflows.registry import get as get_workflow
 class WorkflowError(Exception):
     """The workflow could not proceed: unknown step type, bad params, etc."""
 
+
+async def _load_instance_locked(
+    db: AsyncSession, *, instance_id: uuid.UUID, tenant_id: uuid.UUID
+) -> WorkflowInstance:
+    """
+    Load a workflow instance with a row lock, or raise WorkflowError if
+    not found. Callers hold the lock until the surrounding transaction
+    commits or rolls back.
+    """
+    instance = (
+        await db.execute(
+            select(WorkflowInstance)
+            .where(
+                WorkflowInstance.id == instance_id,
+                WorkflowInstance.tenant_id == tenant_id,
+            )
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if instance is None:
+        raise WorkflowError("instance not found")
+    return instance
+
+async def approve_instance(
+    db: AsyncSession,
+    *,
+    instance_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    approver_user_id: uuid.UUID,
+    note: str | None = None,
+) -> WorkflowInstance:
+    """
+    Approve a workflow waiting on workflow-level approval, then resume it.
+
+    The transition from waiting_workflow_approval to running is atomic:
+    the row is locked, the status is verified, and the transition happens
+    inside the lock. A second concurrent approver sees the post-transition
+    state and gets WorkflowError.
+    """
+    from app.services.audit import service as audit_service
+    from app.services.audit import types as audit_types
+
+    instance = await _load_instance_locked(
+        db, instance_id=instance_id, tenant_id=tenant_id
+    )
+    if instance.status != "waiting_workflow_approval":
+        raise WorkflowError(
+            f"instance is in status {instance.status!r}, "
+            f"expected 'waiting_workflow_approval'"
+        )
+    if instance.triggered_by_user_id == approver_user_id:
+        raise WorkflowError(
+            "the triggering user cannot approve their own workflow"
+        )
+
+    await audit_service.emit(
+        db,
+        tenant_id=tenant_id,
+        event_type=audit_types.WORKFLOW_APPROVED,
+        actor_user_id=approver_user_id,
+        subject_type="workflow_instance",
+        subject_id=instance.id,
+        metadata={
+            "workflow_key": instance.workflow_key,
+            "note": note,
+        },
+    )
+
+    return await resume_instance(db, instance=instance, user_id=approver_user_id)
+
+async def reject_instance(
+    db: AsyncSession,
+    *,
+    instance_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    rejector_user_id: uuid.UUID,
+    reason: str | None = None,
+) -> WorkflowInstance:
+    from app.services.audit import service as audit_service
+    from app.services.audit import types as audit_types
+
+    instance = await _load_instance_locked(
+        db, instance_id=instance_id, tenant_id=tenant_id
+    )
+    if instance.status != "waiting_workflow_approval":
+        raise WorkflowError(
+            f"instance is in status {instance.status!r}, "
+            f"expected 'waiting_workflow_approval'"
+        )
+    if instance.triggered_by_user_id == rejector_user_id:
+        raise WorkflowError(
+            "the triggering user cannot reject their own workflow"
+        )
+
+    instance.status = "rejected"
+    instance.error = reason or "rejected by approver"
+    instance.finished_at = datetime.now(UTC)
+    await db.flush()
+
+    await audit_service.emit(
+        db,
+        tenant_id=tenant_id,
+        event_type=audit_types.WORKFLOW_REJECTED,
+        actor_user_id=rejector_user_id,
+        subject_type="workflow_instance",
+        subject_id=instance.id,
+        metadata={
+            "workflow_key": instance.workflow_key,
+            "reason": instance.error,
+        },
+        message=f"workflow {instance.workflow_key} rejected",
+    )
+    return instance
 
 # ---------- requirement checking ----------
 
@@ -134,6 +249,7 @@ async def start_workflow(
     trigger_metadata: dict[str, Any] | None = None,
     decision_run_id: uuid.UUID | None = None,
     run_now: bool = True,
+    idempotency_key: str | None = None,
 ) -> WorkflowInstance:
     """
     Create a workflow instance, optionally running it to pause or completion.
@@ -152,11 +268,11 @@ async def start_workflow(
     meta = dict(trigger_metadata or {})
     meta["availability_report"] = report
 
-    instance = WorkflowInstance(
-        tenant_id=tenant_id,
-        workflow_key=workflow_key,
-        status="pending",
-        step_states=[
+    instance_values = {
+        "tenant_id": tenant_id,
+        "workflow_key": workflow_key,
+        "status": "pending",
+        "step_states": [
             {
                 "name": s.name,
                 "type": s.type,
@@ -168,14 +284,40 @@ async def start_workflow(
             }
             for s in workflow.steps
         ],
-        workflow_context={},
-        triggered_by_user_id=user_id,
-        trigger_type=trigger_type,
-        trigger_metadata=meta,
-        decision_run_id=decision_run_id,
-    )
-    db.add(instance)
-    await db.flush()
+        "workflow_context": {},
+        "triggered_by_user_id": user_id,
+        "trigger_type": trigger_type,
+        "trigger_metadata": meta,
+        "decision_run_id": decision_run_id,
+        "idempotency_key": idempotency_key,
+    }
+
+    if idempotency_key is not None:
+        stmt = (
+            pg_insert(WorkflowInstance)
+            .values(id=uuid.uuid4(), **instance_values)
+            .on_conflict_do_nothing(
+                index_elements=["tenant_id", "idempotency_key"],
+                index_where=text("idempotency_key IS NOT NULL"),
+            )
+            .returning(WorkflowInstance)
+        )
+        result = await db.execute(stmt)
+        instance = result.scalar_one_or_none()
+        if instance is None:
+            instance = (
+                await db.execute(
+                    select(WorkflowInstance).where(
+                        WorkflowInstance.tenant_id == tenant_id,
+                        WorkflowInstance.idempotency_key == idempotency_key,
+                    )
+                )
+            ).scalar_one()
+            return instance
+    else:
+        instance = WorkflowInstance(**instance_values)
+        db.add(instance)
+        await db.flush()
 
     if run_now:
         await run_instance(db, instance=instance, context=WorkflowContext(
@@ -364,12 +506,18 @@ async def resume_instance(
     """
     Resume a paused instance.
 
-    For waiting_workflow_approval: the approval endpoint calls this after
-    marking the workflow approved.
-    For waiting_action_approval: called when the referenced action reaches
-    a terminal status (Step 17's worker will do this automatically).
-    For waiting_input: called when the API endpoint submits input.
+    Re-fetches the row with a lock to guard against a concurrent resume
+    (another approver, or a worker whose condition just became true).
     """
+    instance = await _load_instance_locked(
+        db, instance_id=instance.id, tenant_id=instance.tenant_id
+    )
+
+    if not instance.status.startswith("waiting_"):
+        raise WorkflowError(
+            f"instance is in status {instance.status!r}, not waiting"
+        )
+
     workflow = get_workflow(instance.workflow_key)
     if workflow is None:
         instance.status = "failed"
@@ -386,9 +534,6 @@ async def resume_instance(
         bag=dict(instance.workflow_context),
     )
 
-    # Mark the current waiting step as completed so run_instance advances.
-    # The step's outcome (approved / action completed) is what unblocks us;
-    # the step itself has already recorded its output.
     for state in instance.step_states:
         if state.get("status") == "waiting":
             state["status"] = "completed"
@@ -710,7 +855,11 @@ async def cancel_instance(
     instance: WorkflowInstance,
     reason: str | None = None,
 ) -> WorkflowInstance:
+    instance = await _load_instance_locked(
+        db, instance_id=instance.id, tenant_id=instance.tenant_id
+    )
     if instance.status in ("completed", "failed", "rejected", "cancelled"):
+        # Terminal states can't be cancelled.
         return instance
     instance.status = "cancelled"
     instance.error = reason or "cancelled by user"
