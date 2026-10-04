@@ -3,6 +3,7 @@ import pytest
 
 from app.core.config import settings
 from app.services.llm import registry
+from app.services.llm.gemini import GeminiProvider
 from app.services.llm.mock import MockLLMProvider
 from app.services.llm.sglang import SGLangProvider
 
@@ -26,6 +27,15 @@ def test_sglang_when_configured(monkeypatch):
     # Building the provider must not attempt a request; only `.generate()`
     # does that. So this test proves construction is safe.
     assert isinstance(p, SGLangProvider)
+
+
+def test_gemini_when_configured(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "gemini", raising=False)
+    p = registry.get_llm_provider()
+    assert isinstance(p, GeminiProvider)
+    assert p.name == "gemini"
+    assert p.base_url == settings.gemini_base_url
+    assert p.model_name == settings.gemini_model_name
 
 
 def test_unknown_raises(monkeypatch):

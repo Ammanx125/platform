@@ -53,6 +53,15 @@ model. If the server requires API authentication, set `LLM_API_KEY` to its
 key; for a server without authentication, keep the `INVALID_LOCAL_KEY`
 sentinel so Sansa omits the Authorization header.
 
+Gemini can be used without running a separate model server. Set
+`LLM_PROVIDER=gemini` and set `LLM_API_KEY` to a Google AI Studio API key in
+the local `.env` file, then restart the API. The default Gemini endpoint and
+model are `https://generativelanguage.googleapis.com/v1beta/openai` and
+`gemini-3.5-flash`; override them with `GEMINI_BASE_URL` and
+`GEMINI_MODEL_NAME` if needed. Keep the key out of source control and chat.
+Questions may send prompt and business context to Google's API, so use
+synthetic demo data unless the relevant data-sharing approval is in place.
+
 ### 1. Clone and create a virtual environment
 
 ```powershell

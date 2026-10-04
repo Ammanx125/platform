@@ -155,6 +155,10 @@ class Settings(BaseSettings):
     llm_api_key: str = "INVALID_LOCAL_KEY"
     llm_base_url: str = "http://127.0.0.1:8001/v1"
     model_name: str = "gemma-4-26b-a4b-it"
+    gemini_base_url: str = (
+        "https://generativelanguage.googleapis.com/v1beta/openai"
+    )
+    gemini_model_name: str = "gemini-3.5-flash"
     llm_request_timeout_seconds: int = 60
     llm_max_retries: int = 2
 

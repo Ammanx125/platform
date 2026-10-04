@@ -98,19 +98,35 @@ class SGLangProvider:
 
         url = f"{self.base_url}/chat/completions"
 
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.max_retries + 1),
-            wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
-            retry=retry_if_exception_type((httpx.HTTPError, httpx.TimeoutException)),
-            reraise=True,
-        ):
-            with attempt:
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(url, json=payload, headers=headers)
+        try:
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(self.max_retries + 1),
+                wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
+                retry=retry_if_exception_type(
+                    (httpx.HTTPError, httpx.TimeoutException)
+                ),
+                reraise=True,
+            ):
+                with attempt:
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        response = await client.post(
+                            url, json=payload, headers=headers
+                        )
+                    if response.status_code in {408, 429, 500, 502, 503, 504}:
+                        raise httpx.HTTPStatusError(
+                            f"transient HTTP {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+        except httpx.HTTPStatusError as exc:
+            raise LLMProviderError(
+                f"{self.name} returned HTTP {exc.response.status_code}: "
+                f"{exc.response.text[:500]}"
+            ) from exc
 
         if response.status_code >= 400:
             raise LLMProviderError(
-                f"sglang returned HTTP {response.status_code}: "
+                f"{self.name} returned HTTP {response.status_code}: "
                 f"{response.text[:500]}"
             )
 
@@ -118,7 +134,7 @@ class SGLangProvider:
             wire = response.json()
         except json.JSONDecodeError as exc:
             raise LLMProviderError(
-                f"sglang response was not JSON: {response.text[:200]}"
+                f"{self.name} response was not JSON: {response.text[:200]}"
             ) from exc
 
         content = self._extract_content(wire)
@@ -140,12 +156,13 @@ class SGLangProvider:
             content = message.get("content")
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMProviderError(
-                f"unexpected response shape from sglang: {wire!r}"
+                f"unexpected response shape from {self.name}: {wire!r}"
             ) from exc
 
         if not isinstance(content, str):
             raise LLMProviderError(
-                f"expected string content, got {type(content).__name__}"
+                f"{self.name} expected string content, "
+                f"got {type(content).__name__}"
             )
         return content
 

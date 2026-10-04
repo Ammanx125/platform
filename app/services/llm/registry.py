@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.core.config import settings
 from app.services.llm.base import LLMProvider
+from app.services.llm.gemini import GeminiProvider
 from app.services.llm.mock import MockLLMProvider
 from app.services.llm.sglang import SGLangProvider
 
@@ -15,8 +16,10 @@ def _build() -> LLMProvider:
         return MockLLMProvider()
     if provider == "sglang":
         return SGLangProvider()
+    if provider == "gemini":
+        return GeminiProvider()
     raise ValueError(
-        f"unknown LLM provider: {provider!r}; expected 'mock' or 'sglang'"
+        f"unknown LLM provider: {provider!r}; expected 'mock', 'sglang', or 'gemini'"
     )
 
 
