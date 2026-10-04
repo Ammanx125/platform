@@ -67,9 +67,9 @@ DETECTORS: list[tuple] = [
         "Transport.FuelUseRate",
         "Transport.Vehicle",
         "zscore_rolling",
-        {"k": 1.5, "window": 4},
+        {"k": 3.0, "window": 4},
         "warning",
-        "Flags unusually high fuel consumed per 100 kilometres by vehicle.",
+        "Flags fuel use more than three rolling standard deviations above the recent baseline.",
     ),
     (
         "transport.supplier_delay_spikes",

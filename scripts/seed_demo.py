@@ -83,17 +83,19 @@ def build_demo_datasets() -> list[DemoDataset]:
             "Operating Cost": f"{260 * (1.075 ** index):.2f}",
         })
 
-        for route, passengers, revenue in (
-            ("Airport Express", 310, 5200),
-            ("Harbor Line", 420, 6800),
-            ("University Loop", 270, 4000),
+        for route, base_passengers, weekly_growth, base_revenue in (
+            ("Airport Express", 310, 8, 5200),
+            ("Harbor Line", 420, 4, 6800),
+            ("University Loop", 270, 2, 4000),
         ):
+            passengers = base_passengers + index * weekly_growth
+            revenue = base_revenue * passengers / base_passengers
             tickets.append({
                 "Ticket Date": iso_date,
                 "Ticket Ref": f"T-{index + 1:02d}-{len(tickets) + 1:03d}",
                 "Route": route,
                 "Passengers": str(passengers),
-                "Revenue": str(revenue),
+                "Revenue": f"{revenue:.2f}",
             })
 
         fuel_rate = 8.2 + index * 0.025
@@ -111,7 +113,7 @@ def build_demo_datasets() -> list[DemoDataset]:
             "Cost": f"{litres * 1.65:.2f}",
         })
 
-        lead_time = 3.0 + index * 0.08
+        lead_time = 3.0 + (index % 3) * 0.05
         if index == len(weeks) - 1:
             lead_time = 18.0
         suppliers.append({

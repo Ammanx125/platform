@@ -99,8 +99,9 @@ directly checkable:
   18 hours;
 - the final fuel-use rate is 11.8 L/100 km, above its earlier values;
 - supplier lead time ends at 18 days after earlier values near 3 days;
-- ticket revenue is stable by week, while customer transaction rows supply the
-  recency/frequency/revenue evidence for the customer segments.
+- passenger counts and ticket revenue rise at different rates across the three
+  named routes, while customer transaction rows show account-level spending
+  and declining customer activity.
 
 ### Start and demonstrate the file-to-analysis path
 
@@ -165,8 +166,10 @@ The analysis can be audited against the CSV values and confirmed mappings.
 For example, `sales.total_revenue` is derived from the ticket revenue and
 customer transaction revenue columns; customer segments use the mapped
 customer, transaction ID, transaction date, and revenue fields. Forecasts use
-content dates extracted from each configured CSV date column. The generated
-records are synthetic and deterministic except for their rolling dates.
+content dates extracted from each configured CSV date column. The overview
+shows transport-relevant metrics instead of inventory KPIs that have no stock
+records in this demo. The generated records are synthetic and deterministic
+except for their rolling dates.
 
 The local presentation configuration uses `LLM_PROVIDER=mock`; its fixed
 `Mock response` is not a live model analysis. Deterministic analytics and

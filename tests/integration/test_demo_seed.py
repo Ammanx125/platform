@@ -53,6 +53,18 @@ async def test_meridian_demo_prepares_files_without_ingesting_them(
         fuel_rows[0]["Fuel Consumed"]
     )
     assert datasets["customer-transactions"].date_column == "Transaction Day"
+    ticket_rows = datasets["ticket-transactions"].rows
+    airport_sales = [
+        row for row in ticket_rows if row["Route"] == "Airport Express"
+    ]
+    assert int(airport_sales[-1]["Passengers"]) > int(
+        airport_sales[0]["Passengers"]
+    )
+    supplier_lead_times = [
+        float(row["Lead Time"]) for row in datasets["supplier-records"].rows
+    ]
+    assert max(supplier_lead_times[:-1]) < 4
+    assert supplier_lead_times[-1] == 18
 
     async with SessionLocal() as db:
         legacy_source = DataSource(
@@ -302,7 +314,10 @@ async def test_meridian_demo_prepares_files_without_ingesting_them(
             )
         ).scalars().all()
         assert len(ingestion_jobs) == 6
-        assert all(job.status == "succeeded" for job in ingestion_jobs)
+        assert all(job.status == "succeeded" for job in ingestion_jobs), [
+            (job.pending_path, job.status, job.error_message)
+            for job in ingestion_jobs
+        ]
 
         staged_rows = (
             await db.execute(
@@ -317,7 +332,7 @@ async def test_meridian_demo_prepares_files_without_ingesting_them(
             tenant_id=two_tenants["tenant_a"],
             source_ids=[source.id],
         )
-        assert revenue.value == 209_310
+        assert revenue.value == pytest.approx(224_396.64)
 
         passengers = await evaluate_kpi(
             db,
@@ -325,7 +340,15 @@ async def test_meridian_demo_prepares_files_without_ingesting_them(
             tenant_id=two_tenants["tenant_a"],
             source_ids=[source.id],
         )
-        assert passengers.value == 12_000
+        assert passengers.value == 12_924
+
+        fuel_use = await evaluate_kpi(
+            db,
+            key="transport.average_fuel_use_rate",
+            tenant_id=two_tenants["tenant_a"],
+            source_ids=[source.id],
+        )
+        assert fuel_use.value == pytest.approx(8.613333333333333)
 
         customer_analysis = await analyze_tenant_customer_behavior(
             db,
@@ -353,6 +376,24 @@ async def test_meridian_demo_prepares_files_without_ingesting_them(
         assert forecasts[0].status == "ok"
         assert forecasts[0].source_ids == [str(source.id)]
 
+        passenger_forecasts = await run_forecast_for_concept(
+            db,
+            tenant_id=two_tenants["tenant_a"],
+            value_concept="Transport.PassengerCount",
+            group_by_concept="Transport.Route",
+            horizon=4,
+            source_ids=[source.id],
+        )
+        assert len(passenger_forecasts) == 3
+        airport_forecast = next(
+            forecast for forecast in passenger_forecasts
+            if forecast.group_label == "Airport Express"
+        )
+        assert airport_forecast.status == "ok"
+        assert airport_forecast.predicted_points[-1]["value"] > int(
+            airport_sales[-1]["Passengers"]
+        )
+
         anomalies = (
             await db.execute(
                 select(Anomaly).where(
@@ -371,5 +412,9 @@ async def test_meridian_demo_prepares_files_without_ingesting_them(
             anomaly.value for anomaly in anomalies
             if anomaly.detector_key == "operations.downtime_spikes"
         ) == 18.0
+        assert max(
+            anomaly.value for anomaly in anomalies
+            if anomaly.detector_key == "transport.fuel_use_rate_spikes"
+        ) == 11.8
 
         await db.commit()

@@ -42,7 +42,12 @@ def _parse_content_timestamp(value: object) -> datetime:
         try:
             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         except ValueError:
-            parsed = datetime.combine(date.fromisoformat(text), datetime.min.time())
+            try:
+                parsed = datetime.combine(
+                    date.fromisoformat(text), datetime.min.time()
+                )
+            except ValueError:
+                parsed = datetime.strptime(text, "%m/%d/%Y")
     else:
         raise ValueError(f"unsupported date value {value!r}")
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed

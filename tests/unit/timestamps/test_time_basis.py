@@ -33,6 +33,12 @@ def test_parse_content_timestamp_assigns_utc_to_date_only_values():
     )
 
 
+def test_parse_content_timestamp_accepts_slash_formatted_dates():
+    assert _parse_content_timestamp("7/19/2026").isoformat() == (
+        "2026-07-19T00:00:00+00:00"
+    )
+
+
 def test_parse_content_timestamp_preserves_explicit_timezone():
     assert _parse_content_timestamp("2025-04-03T10:30:00+02:00").isoformat() == (
         "2025-04-03T10:30:00+02:00"

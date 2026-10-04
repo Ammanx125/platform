@@ -31,8 +31,10 @@
       <div class="eyebrow">Data provenance</div>
       <h2 class="section-title" id="demo-lineage-title">From source file to business signal</h2>
       <p class="row-secondary">
-        These CSVs are the source of the analysis. The watcher
-        reports file hashes first; ingestion happens only after you request it.
+        This 12-week transport scenario follows ticket sales, customer accounts,
+        fuel use, supplier delivery times, and depot operations. It includes
+        rising passenger demand and a final-week fuel, supplier, and downtime
+        disruption.
       </p>
     </div>
     <a class="section-action" href="/datasets/{{ demo_source.id }}">Open source record</a>
@@ -143,15 +145,27 @@
         {% if k.value is mapping %}
           {{ k.value|length }}<span class="stat-unit">groups</span>
         {% elif k.value is number %}
-          {{ "%.2f"|format(k.value) }}
+          {% if k.unit == "currency" %}
+            {{ "{:,.0f}".format(k.value) }}
+          {% elif k.unit == "percent" %}
+            {{ "%.1f"|format(k.value) }}%
+          {% else %}
+            {{ "%.2f"|format(k.value) }}
+          {% endif %}
         {% else %}
           {{ k.value }}
         {% endif %}
-        {% if k.unit and k.value is not mapping %}
-          <span class="stat-unit">{{ k.unit }}</span>
+        {% if k.unit and k.value is not mapping and k.unit not in ["currency", "percent"] %}
+          <span class="stat-unit">{{ demo_kpi_units.get(k.key, k.unit) }}</span>
         {% endif %}
       </div>
-      <div class="command-metric-context">{{ k.domain }} · computed from connected data</div>
+      <div class="command-metric-context">
+        {% if demo_source %}
+          {{ demo_kpi_context.get(k.key, k.domain) }}
+        {% else %}
+          {{ k.domain }} · computed from connected data
+        {% endif %}
+      </div>
     </article>
   {% endfor %}
   <a class="command-metric command-metric-action" href="/approvals">
@@ -177,10 +191,10 @@
   {% if latest_forecast and forecast_plot_points %}
     <div class="forecast-heading">
       <div>
-        <div class="forecast-name">{{ latest_forecast.value_concept|replace("_", " ")|title }}</div>
+        <div class="forecast-name">{{ forecast_title }}</div>
         <div class="row-secondary">
           {{ latest_forecast.group_label or "All groups" }}
-          · {{ latest_forecast.horizon }}-step {{ latest_forecast.frequency }} forecast
+          · {{ latest_forecast.horizon }} {{ latest_forecast.frequency }} periods ahead
         </div>
       </div>
       <div class="forecast-model">
@@ -200,9 +214,15 @@
         {% endif %}
       </svg>
       <div class="forecast-axis-labels">
-        <span>Projected values</span>
+        <span>Projected {{ forecast_title|lower }}</span>
         <span>Through {{ latest_forecast.predicted_points[-1].timestamp[:10] }}</span>
       </div>
+    </div>
+    <div class="row-secondary forecast-outcome">
+      Expected {{ forecast_title|lower }}:
+      <strong>{{ "%.0f"|format(latest_forecast.predicted_points[-1].value) }}</strong>
+      {{ forecast_unit }} by {{ latest_forecast.predicted_points[-1].timestamp[:10] }}.
+      Based on {{ latest_forecast.notes.get("series_length", 0) }} historical observations.
     </div>
     <div class="forecast-footnote">
       Generated {{ latest_forecast.trained_at.strftime("%b %d, %Y at %H:%M") }}
@@ -236,14 +256,15 @@
     <a class="section-action" href="/datasets">Explore connected data</a>
   </header>
   <div class="semantic-layer-intro">
-    Sansa keeps source columns intact and connects confirmed fields to
-    canonical business concepts. Analytics can then compare data even when
-    each system uses different labels.
+    Sansa matches each file column to a shared business definition without
+    changing the source data. For example, “Buy Price” is understood as a
+    purchase price, so the same metric can be compared across files with
+    different column names.
   </div>
   <div class="semantic-layer-stats">
     <strong>{{ mapped_source_count }} source{{ "" if mapped_source_count == 1 else "s" }}</strong>
     <span>·</span>
-    <strong>{{ confirmed_mapping_count }} confirmed mappings</strong>
+    <strong>{{ confirmed_mapping_count }} confirmed column-to-business matches</strong>
   </div>
   {% if semantic_examples %}
     <div class="semantic-example-list">
@@ -366,13 +387,15 @@
           <article class="signal-row">
             <span class="signal-dot signal-{{ 'critical' if a.severity in ['critical', 'error'] else 'warning' if a.severity == 'warning' else 'info' }}" aria-hidden="true"></span>
             <div class="signal-copy">
-              <div class="row-primary">{{ a.detector_key|replace("_", " ")|title }}</div>
+              <div class="row-primary">
+                {{ anomaly_titles.get(a.detector_key, "A business measure changed unusually") }}
+              </div>
               <div class="row-secondary">
-                {{ a.severity|title }} ·
-                {% if a.group_label %}{{ a.group_label }} · {% endif %}
-                {{ "%.4g"|format(a.value) }}
+                {{ "Review" if a.severity == "warning" else "Note" }} ·
+                {% if a.group_label %}{{ a.group_label }}: {% endif %}
+                {{ "%.4g"|format(a.value) }} {{ anomaly_units.get(a.detector_key, "") }}
                 {% if a.expected_min is not none and a.expected_max is not none %}
-                  · expected {{ "%.4g"|format(a.expected_min) }}–{{ "%.4g"|format(a.expected_max) }}
+                  · usual range {{ "%.4g"|format(a.expected_min) }}–{{ "%.4g"|format(a.expected_max) }}
                 {% endif %}
               </div>
             </div>

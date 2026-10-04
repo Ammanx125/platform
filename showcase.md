@@ -4,13 +4,9 @@
 
 1. **The current `.env` uses a mock chat model.** I checked the loaded settings: `LLM_PROVIDER=mock`. The 2.24 GB download is the separate **embedding model** used to search relevant information; it is not the chat LLM. With the current setting, the chat response is literally **“Mock response.”** You can demonstrate the dashboard’s saved analytics and deterministic workflow steps, but don’t present the chat as real LLM reasoning until a real OpenAI-compatible model server is running and Sansa is configured to use it. The platform’s SGLang adapter points to `http://127.0.0.1:8001/v1`, but neither the platform repo nor the watcher repo provides a verified command to start that model server. See `.env` and `the SGLang adapter`.
 
-2. **The registered filesystem-agent mode currently has an authentication bug.** The watcher’s client sends a literal `******` as its Authorization value instead of the agent credential. Don’t rehearse the regular `sansa-agent enroll` / `sansa-agent run` flow until that is fixed in `client.py`. The watcher’s **demo webhook mode** is separate and is the practical watcher path described below.
+2. **The seeded demo does not create a pending approval.** The approval buttons only appear when there is a pending action. The current mock LLM doesn’t propose one, so you may have nothing to simulate unless a pending action is created separately. Also, “Simulate execution” is browser-only and does not execute or record anything on the server; “Approve and execute” is a real server action.
 
-3. **The customer-segment story needs a logic/test correction before you claim “declining customer” insights.** Running the current deterministic analyzer against the generated demo transactions labels Bluebird Travel as a champion even though its recent-versus-prior revenue trend is **−66.7%**. It consequently reports no declining customers in that run, while the database integration test expects Bluebird to be declining. The calculation currently checks “champion” before “declining” in `customer_behavior.py`; the conflicting expectation is in `test_demo_seed.py`. PostgreSQL was unavailable during the earlier integration run, so this remains a blocker to verify and fix.
-
-4. **The seeded demo does not create a pending approval.** The approval buttons only appear when there is a pending action. The current mock LLM doesn’t propose one, so you may have nothing to simulate unless a pending action is created separately. Also, “Simulate execution” is browser-only and does not execute or record anything on the server; “Approve and execute” is a real server action.
-
-I recommend resolving the first three before presenting the platform as a live LLM + agentic analytics demo. The additional frontend improvements to consider are listed at the end.
+The dashboard’s analytics and filesystem watcher can be demonstrated independently of the mock chat model. Don’t present the mock response as live LLM reasoning. The additional frontend improvements to consider are listed at the end.
 
 ---
 
@@ -342,7 +338,7 @@ The files are in `data/demo/meridian_transport/`. Open a few in Excel before log
 
 > “I’m presenting as the manager of Meridian Transport. Before I show you a dashboard number, I want to show you the source records it comes from. These are synthetic demonstration records—not real customer data—but the platform will process these files through the same watcher and ingestion path.”
 
-Point out the checkable values: fuel use rises from **8.20** to **11.80 L/100 km**; supplier lead time ends at **18 days** after earlier values near **3 days**; and the final operations row shows **18 hours of downtime**. Ticket revenue is stable week to week.
+Point out the checkable values: passenger counts and ticket revenue rise across the three named routes; fuel use ends at **11.80 L/100 km**; supplier lead time reaches **18 days** after earlier values near **3 days**; and the final operations row shows **18 hours of downtime**.
 
 ## 4. Show the manager view and the data path
 
@@ -376,11 +372,15 @@ Point to the overview KPIs and signals, then click **Open source record** to sho
 
 For example, the revenue KPI is calculated from mapped revenue columns; customer analysis uses customer, transaction ID, transaction date, and revenue. The integration test verifies **209,310 total revenue**, **12,000 passengers**, and Bluebird Travel’s declining trend against these generated records.
 
-Be transparent about the mappings: the demo data dictionary is configured during setup; it is **not** a live discovery of column meanings during this rehearsal. The dashboard’s current analysis is still grounded in rows uploaded from the CSVs.
+Explain **Semantic understanding** in plain language: Sansa preserves each original column, then matches it to a shared business definition. For example, “Buy Price” is treated as a purchase price. These confirmed matches let analytics use the same business meaning even if two files use different column names. The demo data dictionary is configured during setup; it is **not** live discovery of column meanings during this rehearsal.
+
+The overview now shows transport-relevant metrics only. Inventory measures such as stock by product are intentionally omitted because the transport files contain no stock records; a gross-margin percentage is also omitted because the mapped cost data does not cover all costs needed for a reliable margin.
+
+The checked-in demo pattern now verifies **224,396.64 total ticket and customer revenue** and **12,924 passengers**. The current rehearsal also has a saved four-week passenger forecast; explain it as a projection from 12 weekly observations, not as a guarantee.
 
 ## 7. Close with the right caveats
 
-- If **Business Outlook** says no forecast is saved, skip the forecast claim: the new setup does not pre-generate one, and the overview has no forecast-run button.
+- A newly provisioned tenant does not automatically save a forecast. Generate one before the presentation; this current rehearsal already has a four-week passenger forecast.
 - The presentation environment uses `LLM_PROVIDER=mock`. **Ask Sansa** is not live Gemma reasoning here; the mock returns a fixed response. Don’t use it as proof of analysis.
 - The anomaly signals and KPI/customer analytics are separate from that mock response and are calculated from ingested data.
 - The files are synthetic and intentionally designed to make the trends easy to inspect. Describe them as a demonstration dataset, not as real Meridian operational records.

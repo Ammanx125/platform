@@ -124,6 +124,15 @@ KPIS: list[tuple[str, str, str, str | None, str, dict, str | None]] = [
         {"op": "avg", "concept": "Operations.Downtime"},
         "Average recorded operational downtime.",
     ),
+    (
+        "transport.average_fuel_use_rate",
+        "Average Fuel Use per 100 km",
+        "Transport",
+        "L/100 km",
+        "number",
+        {"op": "avg", "concept": "Transport.FuelUseRate"},
+        "Average fuel consumed per 100 kilometres across recorded trips.",
+    ),
 ]
 
 

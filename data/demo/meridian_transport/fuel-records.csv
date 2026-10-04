@@ -1,13 +1,13 @@
 Service Date,Vehicle,Route,Distance KM,Fuel Consumed,Fuel Use Rate,Cost
-7/19/2026,Bus-17,Airport Express,1700,147.6,8.2,243.54
-7/26/2026,Bus-17,Airport Express,1788,148.05,8.22,244.28
-8/2/2026,Bus-17,Airport Express,1800,148.5,8.25,245.02
-8/9/2026,Bus-17,Airport Express,1805,148.95,8.27,245.77
-8/16/2026,Bus-17,Airport Express,1800,149.4,8.3,246.51
-8/23/2026,Bus-17,Airport Express,1830,149.85,8.32,247.25
-8/30/2026,Bus-17,Airport Express,1800,150.3,8.35,248
-9/6/2026,Bus-17,Airport Express,1800,150.75,8.38,248.74
-9/13/2026,Bus-17,Airport Express,1800,151.2,8.4,249.48
-9/20/2026,Bus-17,Airport Express,1800,151.65,8.42,250.22
-9/27/2026,Bus-17,Airport Express,1800,152.1,8.45,250.96
-10/4/2026,Bus-17,Airport Express,1800,212.4,11.8,350.46
+2026-07-19,Bus-17,Airport Express,1800,147.60,8.20,243.54
+2026-07-26,Bus-17,Airport Express,1800,148.05,8.22,244.28
+2026-08-02,Bus-17,Airport Express,1800,148.50,8.25,245.02
+2026-08-09,Bus-17,Airport Express,1800,148.95,8.27,245.77
+2026-08-16,Bus-17,Airport Express,1800,149.40,8.30,246.51
+2026-08-23,Bus-17,Airport Express,1800,149.85,8.32,247.25
+2026-08-30,Bus-17,Airport Express,1800,150.30,8.35,248.00
+2026-09-06,Bus-17,Airport Express,1800,150.75,8.38,248.74
+2026-09-13,Bus-17,Airport Express,1800,151.20,8.40,249.48
+2026-09-20,Bus-17,Airport Express,1800,151.65,8.42,250.22
+2026-09-27,Bus-17,Airport Express,1800,152.10,8.45,250.96
+2026-10-04,Bus-17,Airport Express,1800,212.40,11.80,350.46

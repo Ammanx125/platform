@@ -27,6 +27,41 @@ from app.web.templating import base_context, templates
 
 router = APIRouter()
 
+_DEMO_KPI_ORDER = (
+    "sales.total_revenue",
+    "operations.average_downtime",
+    "transport.average_fuel_use_rate",
+)
+_DEMO_KPI_CONTEXT = {
+    "sales.total_revenue": "Ticket fares and customer accounts · total in source currency",
+    "operations.average_downtime": "Central Depot · average hours per week",
+    "transport.average_fuel_use_rate": "Bus-17 · litres per 100 kilometres",
+}
+_DEMO_KPI_UNITS = {
+    "transport.average_fuel_use_rate": "L/100 km",
+}
+_ANOMALY_TITLES = {
+    "procurement.purchase_price_spikes": "A supplier price was unusually high",
+    "inventory.stock_level_drops": "Product stock dropped unusually",
+    "sales.revenue_swings": "Customer revenue changed unusually",
+    "operations.downtime_spikes": "Depot downtime was unusually high",
+    "transport.fuel_use_rate_spikes": "Bus fuel use was higher than usual",
+    "transport.supplier_delay_spikes": "A supplier delivery took longer than usual",
+}
+_ANOMALY_UNITS = {
+    "procurement.purchase_price_spikes": "currency units",
+    "inventory.stock_level_drops": "items",
+    "sales.revenue_swings": "currency units",
+    "operations.downtime_spikes": "hours",
+    "transport.fuel_use_rate_spikes": "L/100 km",
+    "transport.supplier_delay_spikes": "days",
+}
+_FORECAST_PRESENTATION = {
+    "Transport.PassengerCount": ("Weekly passengers", "passengers"),
+    "Transport.FuelUseRate": ("Fuel use per 100 km", "L/100 km"),
+    "Finance.Revenue": ("Revenue", "currency units"),
+}
+
 
 def _forecast_plot_points(forecast: Forecast) -> list[str]:
     values = [
@@ -226,8 +261,17 @@ async def overview(
 
     # KPIs: evaluate the catalog, keep those that returned a value.
     kpi_defs = await kpi_service.list_kpis(db)
+    kpi_defs_by_key = {definition.key: definition for definition in kpi_defs}
+    if demo_source is not None:
+        kpi_defs_to_show = [
+            kpi_defs_by_key[key]
+            for key in _DEMO_KPI_ORDER
+            if key in kpi_defs_by_key
+        ]
+    else:
+        kpi_defs_to_show = kpi_defs[:8]
     kpis = []
-    for d in kpi_defs[:8]:
+    for d in kpi_defs_to_show:
         result = await kpi_service.evaluate_kpi(
             db,
             key=d.key,
@@ -236,6 +280,10 @@ async def overview(
         )
         if result.error is None and result.value is not None:
             kpis.append(result)
+    demo_kpi_context = (
+        _DEMO_KPI_CONTEXT if demo_source is not None else {}
+    )
+    demo_kpi_units = _DEMO_KPI_UNITS if demo_source is not None else {}
 
     saved_forecasts = await forecasting_service.list_forecasts(
         db, tenant_id=tenant_id, limit=20
@@ -255,6 +303,19 @@ async def overview(
     )
     forecast_plot_points = (
         _forecast_plot_points(latest_forecast) if latest_forecast else []
+    )
+    forecast_title, forecast_unit = (
+        _FORECAST_PRESENTATION.get(
+            latest_forecast.value_concept,
+            (
+                latest_forecast.value_concept.rsplit(".", 1)[-1]
+                .replace("_", " ")
+                .title(),
+                "",
+            ),
+        )
+        if latest_forecast
+        else ("", "")
     )
 
     customer_behavior = None
@@ -370,12 +431,18 @@ async def overview(
             "demo_file_failed_count": demo_file_failed_count,
             "demo_has_ingestion_jobs": demo_has_ingestion_jobs,
             "kpis": kpis,
+            "demo_kpi_context": demo_kpi_context,
+            "demo_kpi_units": demo_kpi_units,
             "pending_count": pending_count,
             "pending_actions": pending,
             "recent_anomalies": anomalies,
+            "anomaly_titles": _ANOMALY_TITLES,
+            "anomaly_units": _ANOMALY_UNITS,
             "recent_decisions": decisions,
             "latest_forecast": latest_forecast,
             "forecast_plot_points": forecast_plot_points,
+            "forecast_title": forecast_title,
+            "forecast_unit": forecast_unit,
             "customer_behavior": customer_behavior,
             "customer_behavior_error": customer_behavior_error,
             "customer_segment_bars": customer_segment_bars,
