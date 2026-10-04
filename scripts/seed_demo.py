@@ -19,14 +19,14 @@ import os
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
-from app.db.models.analytics import Forecast
-from app.db.models.dataset import DataSource, IngestionJob, StagedRow
+from app.db.models.dataset import DataSource
 from app.db.models.semantic import SemanticMapping
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
@@ -36,16 +36,11 @@ from app.db.seed_concepts import seed_canonical_concepts
 from app.db.seed_kpis import seed_kpis
 from app.db.seed_packs import seed_industry_packs
 from app.db.session import SessionLocal
-from app.services.analytics.anomalies import run_detector
-from app.services.analytics.forecasting import run_forecast_for_concept
-from app.services.ingestion.service import build_storage_key, run_job
 from app.services.semantic import packs as packs_service
-from app.services.storage.local import storage
-from app.services.timestamps.service import record_row_timestamp
-from app.services.understanding.mapper import propose_mappings
 
 TENANT_NAME = "Meridian Transport"
 TENANT_SLUG = "meridian-transport-demo"
+DEMO_SOURCE_NAME = "Meridian Watcher Files"
 SYSTEM_EMAIL_TEMPLATE = "system+{tenant_id}@sansa.local"
 
 
@@ -74,6 +69,7 @@ def build_demo_datasets() -> list[DemoDataset]:
     fuel = []
     suppliers = []
     routes = []
+    customer_transactions = []
 
     for index, service_date in enumerate(weeks):
         iso_date = service_date.isoformat()
@@ -135,6 +131,31 @@ def build_demo_datasets() -> list[DemoDataset]:
                 "Route": route_name,
                 "Distance KM": str(distance),
                 "Travel Minutes": str(travel_minutes),
+            })
+
+    customer_orders = {
+        "Meridian Priority": [(age, 450) for age in range(7, 169, 14)],
+        "Harbor Tours": [(age, 210) for age in (8, 38, 68, 98, 128, 158)],
+        "Coastal Excursions": [
+            (10, 450), (40, 300), (70, 100), (100, 100), (130, 100), (160, 100),
+        ],
+        "Bluebird Travel": [
+            (10, 500), (40, 1500), (70, 1200), (100, 1000), (130, 900), (160, 800),
+        ],
+        "Desert Link": [(100, 400), (130, 450), (160, 500), (200, 600)],
+        "Old Town Shuttle": [(210, 400), (240, 400), (270, 400), (300, 400)],
+        "QuickRide Local": [(7, 25), (21, 25)],
+    }
+    today = date.today()
+    transaction_number = 0
+    for customer, orders in customer_orders.items():
+        for days_ago, amount in orders:
+            transaction_number += 1
+            customer_transactions.append({
+                "Customer Name": customer,
+                "Transaction ID": f"MT-{transaction_number:04d}",
+                "Transaction Day": (today - timedelta(days=days_ago)).isoformat(),
+                "Revenue": f"{amount:.2f}",
             })
 
     return [
@@ -208,6 +229,21 @@ def build_demo_datasets() -> list[DemoDataset]:
                 "Travel Minutes": "Transport.TravelMinutes",
             },
         ),
+        DemoDataset(
+            key="customer-transactions",
+            name="Customer Transactions",
+            date_column="Transaction Day",
+            columns=(
+                "Customer Name", "Transaction ID", "Transaction Day", "Revenue",
+            ),
+            rows=customer_transactions,
+            mappings={
+                "Customer Name": "Sales.Customer",
+                "Transaction ID": "Sales.TransactionId",
+                "Transaction Day": "Sales.TransactionDate",
+                "Revenue": "Finance.Revenue",
+            },
+        ),
     ]
 
 
@@ -219,116 +255,62 @@ def _csv_bytes(dataset: DemoDataset) -> bytes:
     return output.getvalue().encode("utf-8")
 
 
-async def _ensure_dataset(
+def write_demo_files(directory: Path | None = None) -> Path:
+    """Write the watcher's actual, Excel-openable source files."""
+    output_dir = directory or (
+        Path(__file__).resolve().parents[1]
+        / "data"
+        / "demo"
+        / "meridian_transport"
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for dataset in build_demo_datasets():
+        (output_dir / f"{dataset.key}.csv").write_bytes(_csv_bytes(dataset))
+    return output_dir
+
+
+async def _ensure_agent_source(
     db: AsyncSession,
     *,
     tenant_id: uuid.UUID,
     admin_user_id: uuid.UUID,
-    dataset: DemoDataset,
-) -> tuple[DataSource, IngestionJob]:
+) -> DataSource:
+    datasets = build_demo_datasets()
     source = (
         await db.execute(
             select(DataSource).where(
                 DataSource.tenant_id == tenant_id,
-                DataSource.name == dataset.name,
+                DataSource.name == DEMO_SOURCE_NAME,
             )
         )
     ).scalar_one_or_none()
+    content_date_columns = {
+        f"{dataset.key}.csv": dataset.date_column for dataset in datasets
+    }
+    demo_files = [f"{dataset.key}.csv" for dataset in datasets]
+    config = {
+        "demo_profile": "meridian-transport",
+        "demo_files": demo_files,
+        "content_date_columns": content_date_columns,
+    }
     if source is None:
         source = DataSource(
             tenant_id=tenant_id,
-            name=dataset.name,
-            source_type="csv",
-            config={"demo_seed_key": dataset.key},
+            name=DEMO_SOURCE_NAME,
+            source_type="agent",
+            config=config,
         )
         db.add(source)
         await db.flush()
-    elif source.config.get("demo_seed_key") != dataset.key:
+    elif source.source_type != "agent":
         raise ValueError(
-            f"cannot seed demo dataset {dataset.name!r}: a different source "
-            "already uses that name"
+            f"cannot prepare {DEMO_SOURCE_NAME!r}: an existing source with "
+            f"that name has type {source.source_type!r}, expected 'agent'"
         )
+    else:
+        source.config = {**source.config, **config}
+        source.is_active = True
 
-    job = (
-        await db.execute(
-            select(IngestionJob)
-            .where(
-                IngestionJob.tenant_id == tenant_id,
-                IngestionJob.source_id == source.id,
-                IngestionJob.status == "succeeded",
-            )
-            .order_by(IngestionJob.created_at.desc())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if job is None:
-        filename = f"{dataset.key}.csv"
-        key = build_storage_key(
-            tenant_id=tenant_id,
-            source_id=source.id,
-            extension=".csv",
-        )
-        await storage.put(key=key, content=_csv_bytes(dataset))
-        source.config = {
-            **source.config,
-            "storage_key": key,
-            "original_filename": filename,
-        }
-        job = IngestionJob(
-            tenant_id=tenant_id,
-            source_id=source.id,
-            status="pending",
-        )
-        db.add(job)
-        await db.flush()
-        await run_job(db, job_id=job.id)
-        await db.refresh(job)
-        if job.status != "succeeded":
-            raise RuntimeError(
-                f"demo ingestion failed for {dataset.name}: "
-                f"{job.error_message or job.status}"
-            )
-
-    staged_rows = list(
-        (
-            await db.execute(
-                select(StagedRow)
-                .where(
-                    StagedRow.tenant_id == tenant_id,
-                    StagedRow.job_id == job.id,
-                )
-                .order_by(StagedRow.row_number)
-            )
-        ).scalars().all()
-    )
-    await db.flush()
-    for row in staged_rows:
-        timestamp_value = row.raw_data.get(dataset.date_column)
-        if not timestamp_value:
-            raise ValueError(
-                f"demo row {row.row_number} in {dataset.name} has no "
-                f"{dataset.date_column!r}"
-            )
-        timestamp = datetime.combine(
-            date.fromisoformat(str(timestamp_value)),
-            time.min,
-            tzinfo=UTC,
-        )
-        await record_row_timestamp(
-            db,
-            tenant_id=tenant_id,
-            staged_row_id=row.id,
-            kind="content",
-            timestamp=timestamp,
-            context=dataset.date_column,
-        )
-
-    await propose_mappings(
-        db,
-        tenant_id=tenant_id,
-        source_id=source.id,
-        job_id=job.id,
-    )
     mappings = list(
         (
             await db.execute(
@@ -340,18 +322,41 @@ async def _ensure_dataset(
         ).scalars().all()
     )
     mappings_by_column = {mapping.source_column: mapping for mapping in mappings}
-    for column, concept_key in dataset.mappings.items():
+    expected_mappings: dict[str, str] = {}
+    for dataset in datasets:
+        for column, concept_key in dataset.mappings.items():
+            previous = expected_mappings.setdefault(column, concept_key)
+            if previous != concept_key:
+                raise ValueError(
+                    f"demo data dictionary maps {column!r} to both "
+                    f"{previous!r} and {concept_key!r}"
+                )
+
+    for column, concept_key in expected_mappings.items():
         mapping = mappings_by_column.get(column)
-        if mapping is None or mapping.canonical_concept_key != concept_key:
-            actual = mapping.canonical_concept_key if mapping else "unmapped"
+        if mapping is None:
+            mapping = SemanticMapping(
+                tenant_id=tenant_id,
+                source_id=source.id,
+                source_column=column,
+                canonical_concept_key=concept_key,
+                status="confirmed",
+                confidence=None,
+                rationale={"method": "demo_data_dictionary"},
+                confirmed_by_user_id=admin_user_id,
+                confirmed_at=datetime.now(UTC),
+            )
+            db.add(mapping)
+            continue
+        if mapping.canonical_concept_key != concept_key:
             raise ValueError(
-                f"demo semantic mapping mismatch for {dataset.name}.{column}: "
-                f"expected {concept_key}, got {actual}"
+                f"demo semantic mapping mismatch for {DEMO_SOURCE_NAME}.{column}: "
+                f"expected {concept_key}, got {mapping.canonical_concept_key}"
             )
         if mapping.status == "rejected":
             raise ValueError(
-                f"demo mapping {dataset.name}.{column} was rejected; "
-                "review it before rerunning the seed"
+                f"demo mapping {column!r} was rejected; review it before "
+                "preparing the demo"
             )
         if mapping.status != "confirmed":
             mapping.status = "confirmed"
@@ -359,7 +364,23 @@ async def _ensure_dataset(
             mapping.confirmed_at = datetime.now(UTC)
 
     await db.flush()
-    return source, job
+    return source
+
+
+async def _archive_legacy_seed_sources(
+    db: AsyncSession, *, tenant_id: uuid.UUID
+) -> int:
+    sources = (
+        await db.execute(
+            select(DataSource).where(DataSource.tenant_id == tenant_id)
+        )
+    ).scalars().all()
+    archived = 0
+    for source in sources:
+        if source.config.get("demo_seed_key") and source.is_active:
+            source.is_active = False
+            archived += 1
+    return archived
 
 
 async def seed_demo_data(
@@ -368,7 +389,7 @@ async def seed_demo_data(
     tenant_id: uuid.UUID,
     admin_user_id: uuid.UUID,
 ) -> dict[str, int]:
-    """Seed the tenant's semantic catalog, demo sources, and real analytics."""
+    """Prepare tenant catalogs and source metadata without ingesting file rows."""
     admin_exists = (
         await db.execute(
             select(User.id).where(
@@ -395,61 +416,18 @@ async def seed_demo_data(
         db, tenant_id=tenant_id, pack_key="transport.v1"
     )
 
-    sources: dict[str, uuid.UUID] = {}
-    total_rows = 0
-    for dataset in build_demo_datasets():
-        source, job = await _ensure_dataset(
-            db,
-            tenant_id=tenant_id,
-            admin_user_id=admin_user_id,
-            dataset=dataset,
-        )
-        sources[dataset.key] = source.id
-        total_rows += job.rows_staged
-
-    anomaly_count = 0
-    for detector_key in (
-        "operations.downtime_spikes",
-        "transport.fuel_use_rate_spikes",
-        "transport.supplier_delay_spikes",
-    ):
-        anomalies = await run_detector(
-            db,
-            detector_key=detector_key,
-            tenant_id=tenant_id,
-            source_ids=list(sources.values()),
-        )
-        anomaly_count += len(anomalies)
-
-    existing_forecast = (
-        await db.execute(
-            select(Forecast.id).where(
-                Forecast.tenant_id == tenant_id,
-                Forecast.value_concept == "Finance.Cost",
-                Forecast.status == "ok",
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-    if existing_forecast is None:
-        forecasts = await run_forecast_for_concept(
-            db,
-            tenant_id=tenant_id,
-            value_concept="Finance.Cost",
-            group_by_concept=None,
-            horizon=4,
-            source_ids=[sources["daily-operations"]],
-        )
-        if not forecasts or any(result.status != "ok" for result in forecasts):
-            raise RuntimeError(
-                "demo operating-cost forecast could not be generated from "
-                "the seeded weekly operating-cost history"
-            )
-
+    await _ensure_agent_source(
+        db, tenant_id=tenant_id, admin_user_id=admin_user_id
+    )
+    legacy_archived = await _archive_legacy_seed_sources(
+        db, tenant_id=tenant_id
+    )
     await db.flush()
     return {
-        "sources": len(sources),
-        "rows": total_rows,
-        "new_anomalies": anomaly_count,
+        "sources": 1,
+        "rows": 0,
+        "files": len(build_demo_datasets()),
+        "legacy_archived": legacy_archived,
     }
 
 
@@ -489,7 +467,7 @@ async def _ensure_demo_access(
             tenant_id=tenant.id,
             email=email,
             password_hash=hash_password(password),
-            full_name="Meridian Demo Administrator",
+            full_name="Meridian Transport Manager",
             is_active=True,
         )
         user.roles = [roles["admin"]]
@@ -504,6 +482,8 @@ async def _ensure_demo_access(
         raise ValueError("the existing Meridian demo user is inactive")
     else:
         user.roles = [roles["admin"]]
+        if user.full_name in (None, "Meridian Demo Administrator"):
+            user.full_name = "Meridian Transport Manager"
 
     system_user = (
         await db.execute(
@@ -528,6 +508,7 @@ async def _ensure_demo_access(
 
 
 async def run(*, email: str, password: str) -> None:
+    files_dir = write_demo_files()
     async with SessionLocal() as db:
         tenant, user = await _ensure_demo_access(
             db, email=email, password=password
@@ -540,10 +521,13 @@ async def run(*, email: str, password: str) -> None:
         )
         await db.commit()
         print(
-            f"Seeded {TENANT_NAME}: {counts['sources']} sources, "
-            f"{counts['rows']} staged rows, "
-            f"{counts['new_anomalies']} new anomaly signals."
+            f"Prepared {counts['files']} CSV files at {files_dir} and "
+            f"provisioned {counts['sources']} agent source for {TENANT_NAME}. "
+            f"No business rows were ingested; archived "
+            f"{counts['legacy_archived']} legacy seed source(s) without "
+            "deleting their history."
         )
+        print("Open the CSV files in Excel, then point the watcher at this folder.")
         print(f"Tenant slug: {TENANT_SLUG}")
         print(f"Admin email: {email}")
 

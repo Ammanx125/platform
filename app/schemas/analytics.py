@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -120,3 +120,30 @@ class ForecastRunRequest(BaseModel):
     horizon: int | None = None
     source_ids: list[uuid.UUID] | None = None
     models: list[str] | None = None       # override candidate set
+
+
+class CustomerBehaviorRead(BaseModel):
+    customer_key: str
+    last_purchase_date: date
+    recency_days: int
+    purchase_count: int
+    total_revenue: float
+    recent_revenue: float
+    previous_revenue: float
+    trend_pct: float | None
+    segment: str
+    high_value: bool
+
+
+class CustomerBehaviorSummary(BaseModel):
+    as_of_date: date
+    customer_count: int
+    transaction_count: int
+    total_revenue: float
+    at_risk_count: int
+    inactive_count: int
+    high_value_declining_count: int
+    top_10_revenue_share_pct: float | None
+    segment_counts: dict[str, int]
+    customers: list[CustomerBehaviorRead]
+    rows_skipped: int

@@ -20,7 +20,12 @@
         {% for s in sources %}
           {% set c = job_counts.get(s.id, {}) %}
           <tr>
-            <td><a href="/datasets/{{ s.id }}">{{ s.name }}</a></td>
+            <td>
+              <a href="/datasets/{{ s.id }}">{{ s.name }}</a>
+              {% if not s.is_active %}
+                <span class="badge badge-neutral" title="Retained for history; excluded from current analytics">inactive</span>
+              {% endif %}
+            </td>
             <td><span class="badge badge-neutral">{{ s.source_type }}</span></td>
             <td>
               {% if c.latest_status == "succeeded" %}<span class="badge badge-success">{{ c.latest_status }}</span>

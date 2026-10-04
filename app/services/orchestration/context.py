@@ -61,7 +61,8 @@ class EvidenceItem:
     """
     One piece of evidence shown to the LLM.
 
-    kind:             "chunk" | "kpi" | "anomaly" | "forecast"
+    kind:             "chunk" | "kpi" | "anomaly" | "forecast" |
+                      "customer_behavior"
     id:               stable identifier the LLM can cite in claims[].evidence_ids
     text:             the evidence rendered as text for prose sections
     data:             the structured payload (for the JSON section)
@@ -89,13 +90,18 @@ class Evidence:
     kpis: list[EvidenceItem] = field(default_factory=list)
     anomalies: list[EvidenceItem] = field(default_factory=list)
     forecasts: list[EvidenceItem] = field(default_factory=list)
+    customer_behaviors: list[EvidenceItem] = field(default_factory=list)
     workflows: list[EvidenceItem] = field(default_factory=list)
     capability_errors: list[dict[str, Any]] = field(default_factory=list)
 
     def all_items(self) -> list[EvidenceItem]:
         return [
-            *self.chunks, *self.kpis,
-            *self.anomalies, *self.forecasts, *self.workflows,
+            *self.chunks,
+            *self.kpis,
+            *self.anomalies,
+            *self.forecasts,
+            *self.customer_behaviors,
+            *self.workflows,
         ]
 
     def to_dict(self) -> dict[str, Any]:
@@ -109,6 +115,7 @@ class Evidence:
             "kpis": [_wrap(i) for i in self.kpis],
             "anomalies": [_wrap(i) for i in self.anomalies],
             "forecasts": [_wrap(i) for i in self.forecasts],
+            "customer_behaviors": [_wrap(i) for i in self.customer_behaviors],
             "workflows": [_wrap(i) for i in self.workflows],
             "capability_errors": self.capability_errors,
         }

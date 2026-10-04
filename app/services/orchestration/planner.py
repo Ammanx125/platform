@@ -52,6 +52,10 @@ _METRIC_TOKENS = frozenset({
     "spend", "revenue", "cost", "margin", "stock", "inventory",
     "lead time", "downtime", "kpi", "metric",
 })
+_CUSTOMER_BEHAVIOR_TOKENS = frozenset({
+    "customer", "customers", "client", "clients", "churn", "retention",
+    "rfm", "champion", "champions", "loyal", "declining", "risk",
+})
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -74,6 +78,7 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
     wants_anomaly = bool(toks & _ANOMALY_TOKENS)
     wants_trend = bool(toks & _TREND_TOKENS)
     wants_metric = bool(toks & _METRIC_TOKENS)
+    wants_customer_behavior = bool(toks & _CUSTOMER_BEHAVIOR_TOKENS)
 
     # Retrieval is cheap and almost always useful for a "why" question.
     if wants_why or wants_trend:
@@ -100,9 +105,15 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
         steps.append(PlanStep(
             capability="forecast",
             reason="query mentions forecasting/prediction",
-            # Explicit specs come from the LLM router or the caller.
-            # The rules tier can't infer which series to forecast.
+            # The capability resolves mapped concepts from the query when
+            # callers do not provide explicit specs.
             parameters={},
+        ))
+
+    if wants_customer_behavior:
+        steps.append(PlanStep(
+            capability="customer_behavior",
+            reason="query asks about customer value, activity, or retention",
         ))
 
     # Domain workflows take precedence over generic capabilities when the
@@ -110,7 +121,7 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
     # health/status questions; more specific workflow matches can also take
     # precedence over generic capability rules.
     matched_workflows = match_workflows(request.query)
-    if matched_workflows and (
+    if matched_workflows and not wants_customer_behavior and not wants_forecast and (
         not steps
         or workflow_match_score(request.query, matched_workflows[0]) >= 2
     ):

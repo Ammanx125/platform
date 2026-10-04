@@ -215,23 +215,16 @@ async def _update_pending_upload(
 
     await db.flush()
 
-    # Check if all pending uploads for this job's ingestion_job are done.
-    # If yes, the ingestion can run.
-    if status == "completed":
-        await _maybe_trigger_ingestion(db, ingestion_job_id=pending.job_id)
+    await _maybe_trigger_ingestion(db, ingestion_job_id=pending.job_id)
 
 
 async def _maybe_trigger_ingestion(
     db: AsyncSession, *, ingestion_job_id: uuid.UUID
 ) -> None:
     """
-    If every PendingFileUpload for this ingestion job is delivered, run
-    the job. Called inline after each successful upload.
-
-    Note: this runs `run_job` synchronously inside the agent's request.
-    For v1 that's acceptable — one file at a time, and the file has just
-    been written to storage. If ingestion becomes slow, move this to a
-    worker task that polls for "ready" jobs.
+    Failed uploads terminate their ingestion job here. Successfully
+    delivered jobs remain pending for the ingestion worker, keeping file
+    delivery requests independent from parsing and analytics work.
     """
     from app.db.models.agent import PendingFileUpload
     from app.db.models.dataset import IngestionJob
@@ -262,18 +255,12 @@ async def _maybe_trigger_ingestion(
         # Still waiting on other files.
         return
 
-    delivered = [p for p in pending if p.status == "delivered"]
-    if not delivered:
+    if not any(p.status == "delivered" for p in pending):
         # Every file failed.
         job_row.status = "failed"
         job_row.error_message = "no files were delivered by the agent"
         job_row.finished_at = datetime.now(UTC)
         await db.flush()
-        return
-
-    # Run the job. Import here to avoid circular imports.
-    from app.services.ingestion.service import run_job
-    await run_job(db, job_id=ingestion_job_id)
 
 
 async def get_job(

@@ -32,11 +32,13 @@ from app.db.models.analytics import (
     KPIDefinition,
 )
 from app.services.analytics import anomalies as anomalies_service
+from app.services.analytics import customer_behavior as customer_behavior_service
 from app.services.analytics import forecasting as forecasting_service
 from app.services.analytics import kpi as kpi_service
 from app.services.orchestration.context import EvidenceItem
 from app.services.retrieval.base import RetrievalFilters
 from app.services.retrieval.hybrid import HybridRetriever
+from app.services.security.prompt_safety import wrap_untrusted
 
 
 class CapabilityError(Exception):
@@ -267,8 +269,16 @@ class ForecastCapability:
     ) -> list[EvidenceItem]:
         specs = step_params.get("specs")
         if not specs:
+            specs = await forecasting_service.infer_forecast_specs(
+                db,
+                tenant_id=tenant_id,
+                query=query,
+                source_ids=source_ids,
+            )
+        if not specs:
             raise CapabilityError(
-                "forecast capability requires explicit specs in step_params"
+                "could not infer a forecast measure from this question and "
+                "the tenant's confirmed numeric mappings"
             )
 
         items: list[EvidenceItem] = []
@@ -283,6 +293,7 @@ class ForecastCapability:
                     value_concept=value_concept,
                     group_by_concept=group_by,
                     horizon=horizon,
+                    horizon_days=spec.get("horizon_days"),
                     source_ids=source_ids,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -316,6 +327,65 @@ class ForecastCapability:
         return items
 
 
+# ---------- customer behavior ----------
+
+class CustomerBehaviorCapability:
+    name = "customer_behavior"
+
+    async def run(
+        self,
+        *,
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        step_params: dict[str, Any],
+        query: str,
+        source_ids: list[uuid.UUID] | None,
+    ) -> list[EvidenceItem]:
+        try:
+            analysis = await customer_behavior_service.analyze_tenant_customer_behavior(
+                db,
+                tenant_id=tenant_id,
+                source_ids=source_ids,
+            )
+        except customer_behavior_service.CustomerBehaviorDataError as exc:
+            raise CapabilityError(str(exc)) from exc
+        if analysis is None:
+            raise CapabilityError(
+                "customer behavior requires confirmed customer, transaction ID, "
+                "transaction date, and revenue mappings"
+            )
+
+        concentration = (
+            f"{analysis.top_10_revenue_share_pct:.1f}%"
+            if analysis.top_10_revenue_share_pct is not None
+            else "unavailable"
+        )
+        text = (
+            f"{analysis.customer_count} customers analyzed across "
+            f"{analysis.transaction_count} unique transactions; "
+            f"{analysis.segment_counts['champions']} champions, "
+            f"{analysis.high_value_declining_count} high-value customers declining, "
+            f"{analysis.at_risk_count} at risk, "
+            f"{analysis.inactive_count} inactive; "
+            f"top-10 customer revenue concentration={concentration}."
+        )
+        payload = customer_behavior_service.to_summary_dict(analysis)
+        payload["customers"] = [
+            {
+                **customer,
+                "customer_key": wrap_untrusted(customer["customer_key"]),
+            }
+            for customer in payload["customers"]
+            if customer["segment"] in {"at_risk", "inactive", "declining"}
+        ][:20]
+        return [EvidenceItem(
+            kind="customer_behavior",
+            id="customer_behavior:summary",
+            text=text,
+            data=payload,
+        )]
+
+
 # ---------- registry ----------
 
 CAPABILITIES: dict[str, Capability] = {
@@ -323,6 +393,7 @@ CAPABILITIES: dict[str, Capability] = {
     "kpi": KPICapability(),
     "anomaly": AnomalyCapability(),
     "forecast": ForecastCapability(),
+    "customer_behavior": CustomerBehaviorCapability(),
 }
 
 

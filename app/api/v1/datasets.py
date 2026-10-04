@@ -505,11 +505,31 @@ async def _trigger_agent_ingest(
     classification = await agent_classifier.classify_observations(
         db, tenant_id=tenant_id, source_id=dataset_id
     )
-    if not classification.ready:
+    claimed_uploads = set(
+        (
+            await db.execute(
+                select(IngestionJob.pending_path, IngestionJob.pending_hash).where(
+                    IngestionJob.source_id == dataset_id,
+                    IngestionJob.tenant_id == tenant_id,
+                    IngestionJob.status.in_(("pending", "running", "succeeded")),
+                )
+            )
+        ).all()
+    )
+    ready_to_ingest = [
+        observation
+        for observation in classification.ready
+        if (observation.path, observation.content_hash) not in claimed_uploads
+    ]
+    if not ready_to_ingest:
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "no files are ready to ingest",
+                "message": (
+                    "all observed files are already queued or ingested"
+                    if classification.ready
+                    else "no files are ready to ingest"
+                ),
                 "classification": classification.to_dict(),
             },
         )
@@ -517,7 +537,7 @@ async def _trigger_agent_ingest(
     # Create one ingestion job per ready file and one agent job per file.
     total_agent_jobs = 0
     ingestion_job_ids: list[uuid.UUID] = []
-    for obs in classification.ready:
+    for obs in ready_to_ingest:
         # Create the ingestion job.
         ingestion_job = await ingestion_service.enqueue_job(
             db, tenant_id=tenant_id, source_id=source.id

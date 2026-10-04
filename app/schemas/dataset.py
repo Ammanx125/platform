@@ -41,6 +41,8 @@ class DataSourceRead(BaseModel):
 class IngestionJobRead(BaseModel):
     id: uuid.UUID
     source_id: uuid.UUID
+    pending_path: str | None
+    pending_hash: str | None
     status: str
     rows_read: int
     rows_staged: int

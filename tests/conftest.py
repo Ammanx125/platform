@@ -14,6 +14,7 @@ from app.db.models.user import User
 from app.db.seed import ensure_permission_catalog, seed_tenant_roles
 from app.db.session import SessionLocal, engine
 from app.main import app
+from app.services.llm import registry as llm_registry
 from app.services.retrieval.embeddings import registry
 
 
@@ -89,10 +90,13 @@ async def two_tenants() -> AsyncGenerator[dict]:
         await db.commit()
 
 @pytest.fixture(autouse=True)
-def _force_mock_embeddings(monkeypatch):
+def _force_mock_test_providers(monkeypatch):
     monkeypatch.setattr(settings, "embedding_provider", "mock", raising=False)
+    monkeypatch.setattr(settings, "llm_provider", "mock", raising=False)
     # Do NOT override dimensions — the DB column is now vector(1024), and
     # mock vectors must match.
     registry.reset_embedding_provider()
+    llm_registry.reset_llm_provider()
     yield
     registry.reset_embedding_provider()
+    llm_registry.reset_llm_provider()

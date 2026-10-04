@@ -28,6 +28,7 @@ def test_builds_local_when_configured(monkeypatch):
     # fast and doesn't download anything.
     assert isinstance(provider, LocalEmbeddingProvider)
     assert provider.dimensions == settings.embedding_dimensions
+    assert provider._cache_dir == settings.fastembed_cache_dir
 
 
 def test_unknown_provider_raises(monkeypatch):

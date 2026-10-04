@@ -80,7 +80,10 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     # ---------- Finance (6) ----------
     (
         "Finance.Revenue", "Revenue", "Finance", "attribute", "number",
-        ["revenue", "sales_amount", "total_sales", "net_sales", "gross_sales", "invoice_total"],
+        [
+            "revenue", "sales", "sale", "sales_amount", "total_sales",
+            "net_sales", "gross_sales", "invoice_total",
+        ],
         "Income from sales of goods or services.",
     ),
     (
@@ -130,6 +133,21 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
         "Sales.SalesOrder", "Sales Order", "Sales", "fact", "string",
         ["sales_order", "so", "so_number", "order_number", "order_id"],
         "A formal order received from a customer.",
+    ),
+    (
+        "Sales.TransactionId", "Sales Transaction ID", "Sales", "attribute", "string",
+        [
+            "transaction_id", "transaction_number", "transaction_ref",
+            "sales_transaction_id", "receipt_id", "ticket_ref",
+        ],
+        "A stable identifier for one customer transaction or purchase.",
+    ),
+    (
+        "Sales.TransactionDate", "Sales Transaction Date", "Sales", "attribute", "date",
+        [
+            "sales_date", "purchase_date", "sale_date", "transaction_day",
+        ],
+        "The date on which a customer transaction occurred.",
     ),
     (
         "Sales.SellingPrice", "Selling Price", "Sales", "attribute", "number",

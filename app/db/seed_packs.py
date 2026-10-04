@@ -42,6 +42,18 @@ PACKS: list[dict] = [
             {"key": "Procurement.PurchaseOrder"},
             {"key": "Procurement.PurchasePrice"},
             {"key": "Procurement.LeadTime"},
+            {
+                "key": "Procurement.PurchaseAmount",
+                "display_name": "Purchase Amount",
+                "domain": "Procurement",
+                "kind": "attribute",
+                "value_type": "number",
+                "synonyms": [
+                    "purchase_amount", "total_purchase", "order_total",
+                    "procurement_spend", "purchase_total",
+                ],
+                "description": "The total monetary amount of a customer or supplier purchase.",
+            },
             # A pack-only concept: not in the base catalog.
             {
                 "key": "Procurement.RFQ",

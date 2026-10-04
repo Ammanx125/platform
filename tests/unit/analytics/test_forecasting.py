@@ -69,6 +69,32 @@ async def test_forecasts_a_clean_trend():
 
 
 @pytest.mark.asyncio
+async def test_forecast_days_are_converted_to_steps_at_series_frequency():
+    points = [
+        TimeSeriesPoint(
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(days=i * 7),
+            value=float(i),
+            source_id=uuid.uuid4(),
+        )
+        for i in range(40)
+    ]
+    result = await forecast_series(
+        _DBStub(),  # type: ignore[arg-type]
+        tenant_id=uuid.uuid4(),
+        value_concept="Finance.Revenue",
+        group_key="",
+        group_label="",
+        points=points,
+        horizon_days=30,
+        persist=False,
+    )
+
+    assert result.status == "ok"
+    assert result.horizon == 5
+    assert len(result.predicted_points) == 5
+
+
+@pytest.mark.asyncio
 async def test_concept_forecast_passes_source_ids_from_each_series(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

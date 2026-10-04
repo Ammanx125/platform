@@ -28,6 +28,23 @@ async def test_forecast_question_triggers_forecast():
 
 
 @pytest.mark.asyncio
+async def test_natural_language_sales_projection_keeps_forecast_capability():
+    p = await plan(OrchestratorRequest(
+        query="What will our sales look like over the next 30 days?"
+    ))
+    assert [step.capability for step in p.steps] == ["forecast"]
+
+
+@pytest.mark.asyncio
+async def test_customer_retention_question_triggers_behavior_without_workflow_override():
+    p = await plan(OrchestratorRequest(
+        query="Which customers are at risk or showing declining purchases?"
+    ))
+    caps = {s.capability for s in p.steps}
+    assert "customer_behavior" in caps
+
+
+@pytest.mark.asyncio
 async def test_unmatched_query_falls_through_to_all():
     p = await plan(OrchestratorRequest(query="hello"))
     assert p.routing_method == "all"

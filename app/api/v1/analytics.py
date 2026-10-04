@@ -16,6 +16,8 @@ from app.db.session import get_db
 from app.schemas.analytics import (
     AnomalyDetectorRead,
     AnomalyRead,
+    CustomerBehaviorRead,
+    CustomerBehaviorSummary,
     ForecastRead,
     ForecastRunRequest,
     KPIDefinitionRead,
@@ -24,10 +26,84 @@ from app.schemas.analytics import (
     RunDetectorRequest,
 )
 from app.services.analytics import anomalies as anomalies_service
+from app.services.analytics import customer_behavior as customer_behavior_service
 from app.services.analytics import forecasting as forecasting_service
 from app.services.analytics import kpi as kpi_service
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+@router.get(
+    "/customer-behavior",
+    response_model=CustomerBehaviorSummary,
+)
+async def get_customer_behavior(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
+    source_ids: list[uuid.UUID] | None = None,
+    limit: int = 100,
+) -> CustomerBehaviorSummary:
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 500")
+    try:
+        analysis = await customer_behavior_service.analyze_tenant_customer_behavior(
+            db,
+            tenant_id=tenant_id,
+            source_ids=source_ids,
+        )
+    except customer_behavior_service.CustomerBehaviorDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if analysis is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "customer behavior requires confirmed customer, transaction ID, "
+                "transaction date, and revenue mappings with usable transaction rows"
+            ),
+        )
+    payload = customer_behavior_service.to_summary_dict(analysis)
+    payload["customers"] = payload["customers"][:limit]
+    return CustomerBehaviorSummary.model_validate(payload)
+
+
+@router.get(
+    "/customer-behavior/{customer_key}",
+    response_model=CustomerBehaviorRead,
+)
+async def get_customer_behavior_profile(
+    customer_key: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("knowledge:read"))],
+    source_ids: list[uuid.UUID] | None = None,
+) -> CustomerBehaviorRead:
+    try:
+        analysis = await customer_behavior_service.analyze_tenant_customer_behavior(
+            db,
+            tenant_id=tenant_id,
+            source_ids=source_ids,
+        )
+    except customer_behavior_service.CustomerBehaviorDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if analysis is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "customer behavior requires confirmed customer, transaction ID, "
+                "transaction date, and revenue mappings with usable transaction rows"
+            ),
+        )
+    profile = next(
+        (
+            item for item in analysis.customers
+            if item.customer_key.casefold() == customer_key.strip().casefold()
+        ),
+        None,
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="customer profile not found")
+    return CustomerBehaviorRead.model_validate(profile)
 
 
 @router.get("/kpis", response_model=list[KPIDefinitionRead])

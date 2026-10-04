@@ -11,5 +11,40 @@ KDlg8feQ3YYVD_VqkWODytoIlFoWyv3CsI2XIMISw_Y=             # The result
 python -m scripts.create_admin `
   --tenant-name "Sansa Demo" `
   --tenant-slug "sansa-demo" `
-  --admin-email "admin@sansa.local" `
+  --admin-email "amanuel@gmail.com" `
   --admin-password "SansaDemo2026"
+
+python -m scripts.create_admin `
+  --tenant-name "Sansa Demo" `
+  --tenant-slug "sansa-demo1" `
+  --admin-email "amanuel@gmail.com" `
+  --admin-password "SansaDemo2026"
+
+$env:SANSA_DEMO_WEBHOOK_URL = "http://127.0.0.1:8000/api/v1/webhooks/OiH6GZCbmfSAxOWeNcJnmpha7-haejZ_IFapZYy-l_0"
+$env:SANSA_DEMO_WEBHOOK_SECRET = "gyhG2NEiZ0hw3dAMMmIunSCOEZ5Beac8IuzesXLBYPqd3Cx8W_qnUF-9uT2u9wYA"
+Set-Location "C:\Users\LocalAdmin\Documents\sansa-agent"
+.\.venv\Scripts\python.exe -m sansa_agent run-demo-watcher --interval 30
+
+
+$env:DEMO_ADMIN_EMAIL = "admin@demo.com"
+$env:DEMO_ADMIN_PASSWORD = "Sansa2026"
+uv run python -m scripts.seed_demo
+uv run python -m scripts.enroll_demo_agent
+
+
+
+
+cd C:\Users\LocalAdmin\Documents\sansa-agent
+uv sync --dev
+$token = Read-Host "Paste the one-time enrollment token"
+uv run sansa-agent enroll `
+  --server-url http://127.0.0.1:8000 `
+  --enrollment-token $token `
+  --watch-root C:\Users\LocalAdmin\Documents\platform\data\demo\meridian_transport
+Remove-Variable token
+uv run sansa-agent run --interval 5
+
+
+
+
+

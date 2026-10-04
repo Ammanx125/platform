@@ -5,6 +5,8 @@ candidates, backtest, produce a forecast, persist, and expose list/read.
 """
 from __future__ import annotations
 
+import math
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -14,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.models.analytics import Forecast
+from app.db.models.dataset import DataSource
+from app.db.models.semantic import CanonicalConcept, SemanticMapping
 from app.services.analytics.backtest import backtest
 from app.services.analytics.forecast_models import (
     ModelFitError,
@@ -58,6 +62,139 @@ class ForecastResult:
     status: str                          # ok | insufficient_history | failed
     notes: dict
     trained_at: datetime
+
+
+_FORECAST_ALIASES = (
+    (("sales", "revenue"), "Finance.Revenue"),
+    (("inventory", "stock"), "Inventory.StockLevel"),
+    (("purchases", "purchase amount", "procurement spend"), "Procurement.PurchaseAmount"),
+    (("purchase price", "unit cost"), "Procurement.PurchasePrice"),
+    (("operating cost", "operating costs", "cost", "costs"), "Finance.Cost"),
+    (("fuel use", "fuel consumption"), "Transport.FuelUseRate"),
+    (("passengers", "passenger volume"), "Transport.PassengerCount"),
+)
+
+_DAY_HORIZON_RE = re.compile(
+    r"\bnext\s+(\d+)\s+(days?|weeks?|months?|quarters?|years?)\b",
+    re.IGNORECASE,
+)
+
+
+def _requested_horizon_days(query: str) -> int | None:
+    match = _DAY_HORIZON_RE.search(query)
+    if match:
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
+        multiplier = (
+            7 if unit.startswith("week") else
+            30 if unit.startswith("month") else
+            90 if unit.startswith("quarter") else
+            365 if unit.startswith("year") else
+            1
+        )
+        return amount * multiplier
+    normalized = query.casefold()
+    for phrase, days in (("next month", 30), ("next quarter", 90), ("next year", 365)):
+        if phrase in normalized:
+            return days
+    return None
+
+
+def _phrase_matches(query: str, phrase: str) -> bool:
+    query_words = re.findall(r"[a-z0-9]+", query.casefold())
+    phrase_words = re.findall(r"[a-z0-9]+", phrase.casefold())
+    if not phrase_words or len(phrase_words) > len(query_words):
+        return False
+    return any(
+        query_words[index:index + len(phrase_words)] == phrase_words
+        for index in range(len(query_words) - len(phrase_words) + 1)
+    )
+
+
+async def infer_forecast_specs(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    query: str,
+    source_ids: list[uuid.UUID] | None = None,
+) -> list[dict]:
+    """Resolve a forecast request to a mapped numeric concept without an LLM."""
+    stmt = (
+        select(CanonicalConcept)
+        .join(
+            SemanticMapping,
+            SemanticMapping.canonical_concept_key == CanonicalConcept.key,
+        )
+        .join(DataSource, DataSource.id == SemanticMapping.source_id)
+        .where(
+            SemanticMapping.tenant_id == tenant_id,
+            SemanticMapping.status == "confirmed",
+            DataSource.tenant_id == tenant_id,
+            DataSource.is_active.is_(True),
+            CanonicalConcept.value_type == "number",
+        )
+        .distinct()
+    )
+    if source_ids is not None:
+        stmt = stmt.where(DataSource.id.in_(source_ids))
+    concepts = list((await db.execute(stmt)).scalars().all())
+    concepts_by_key = {concept.key: concept for concept in concepts}
+    if not concepts_by_key:
+        return []
+
+    value_concept: str | None = None
+    for phrases, concept_key in _FORECAST_ALIASES:
+        if (
+            concept_key in concepts_by_key
+            and any(_phrase_matches(query, phrase) for phrase in phrases)
+        ):
+            value_concept = concept_key
+            break
+
+    if value_concept is None:
+        matched: list[tuple[int, str]] = []
+        for concept in concepts:
+            phrases = [
+                concept.display_name,
+                concept.key.rsplit(".", 1)[-1].replace("_", " "),
+                *(concept.synonyms or []),
+            ]
+            if any(_phrase_matches(query, phrase) for phrase in phrases):
+                matched.append((max(len(phrase) for phrase in phrases if _phrase_matches(query, phrase)), concept.key))
+        if matched:
+            value_concept = max(matched)[1]
+    if value_concept is None:
+        return []
+
+    group_by_concept = None
+    if any(
+        _phrase_matches(query, phrase)
+        for phrase in ("by customer", "per customer", "customer level", "customer")
+    ):
+        group_stmt = (
+            select(SemanticMapping.canonical_concept_key)
+            .join(DataSource, DataSource.id == SemanticMapping.source_id)
+            .where(
+                SemanticMapping.tenant_id == tenant_id,
+                SemanticMapping.status == "confirmed",
+                SemanticMapping.canonical_concept_key == "Sales.Customer",
+                DataSource.tenant_id == tenant_id,
+                DataSource.is_active.is_(True),
+            )
+        )
+        if source_ids is not None:
+            group_stmt = group_stmt.where(DataSource.id.in_(source_ids))
+        if (await db.execute(group_stmt.limit(1))).scalar_one_or_none():
+            group_by_concept = "Sales.Customer"
+
+    spec: dict[str, str | int | None] = {
+        "value_concept": value_concept,
+        "group_by_concept": group_by_concept,
+    }
+    horizon_days = _requested_horizon_days(query)
+    if horizon_days is not None:
+        spec["horizon_days"] = horizon_days
+    return [spec]
 
 
 def _generate_candidates(
@@ -116,6 +253,7 @@ async def forecast_series(
     group_label: str,
     points: list,                       # list[TimeSeriesPoint]
     horizon: int | None = None,
+    horizon_days: int | None = None,
     requested_models: list[str] | None = None,
     source_ids: list[str] | None = None,
     persist: bool = True,
@@ -124,7 +262,6 @@ async def forecast_series(
     Core forecast function. Takes a pre-built series (points already
     assembled) and produces a ForecastResult. Persists if `persist=True`.
     """
-    horizon = horizon or settings.forecast_default_horizon
     metric = settings.forecast_evaluation_metric
 
     series_obj = TimeSeries(
@@ -136,6 +273,13 @@ async def forecast_series(
     )
 
     frequency = detect_frequency(series_obj)
+    if horizon_days is not None:
+        if horizon_days < 1:
+            raise ValueError("horizon_days must be positive")
+        median_gap = frequency.median_gap_days or 1.0
+        horizon = max(1, math.ceil(horizon_days / median_gap))
+    else:
+        horizon = horizon or settings.forecast_default_horizon
     values = [p.value for p in series_obj.points]
     trained_at = datetime.now(UTC)
 
@@ -289,6 +433,7 @@ async def forecast_series(
         notes={
             "median_gap_days": frequency.median_gap_days,
             "series_length": len(values),
+            "requested_horizon_days": horizon_days,
         },
         trained_at=trained_at,
     )
@@ -304,6 +449,7 @@ async def run_forecast_for_concept(
     value_concept: str,
     group_by_concept: str | None,
     horizon: int | None = None,
+    horizon_days: int | None = None,
     source_ids: list[uuid.UUID] | None = None,
     requested_models: list[str] | None = None,
 ) -> list[ForecastResult]:
@@ -327,6 +473,7 @@ async def run_forecast_for_concept(
             group_label=s.group_label,
             points=s.points,
             horizon=horizon,
+            horizon_days=horizon_days,
             requested_models=requested_models,
             source_ids=[
                 str(source_id)

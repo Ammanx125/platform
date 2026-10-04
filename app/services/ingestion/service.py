@@ -278,6 +278,28 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
         # Flush staged rows so the profiler can see them, then compute the
         # profile. Kept inside the try so a profiling failure fails the job.
         await db.flush()
+        if is_agent_source:
+            date_columns = source.config.get("content_date_columns", {})
+            if not isinstance(date_columns, dict):
+                raise IngestionError(
+                    "agent source content_date_columns must be an object"
+                )
+            date_column = date_columns.get(job.pending_path)
+            if date_column is not None:
+                if not isinstance(date_column, str) or not date_column:
+                    raise IngestionError(
+                        "configured content date column must be a non-empty string"
+                    )
+                from app.services.timestamps.service import (
+                    record_content_timestamps_for_job,
+                )
+
+                await record_content_timestamps_for_job(
+                    db,
+                    job_id=job.id,
+                    date_column=date_column,
+                )
+
         from app.services.understanding.service import compute_profile
         await compute_profile(
             db, tenant_id=job.tenant_id, job_id=job.id

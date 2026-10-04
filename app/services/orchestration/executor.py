@@ -46,6 +46,7 @@ _EVIDENCE_CAPS = {
     "kpi": 100,
     "anomaly": 20,
     "forecast": 100,
+    "customer_behavior": 10,
     "workflow": 5,
 }
 
@@ -95,6 +96,10 @@ def _render_prompt(request: OrchestratorRequest, evidence: Evidence) -> str:
     if evidence.forecasts:
         lines.append("Forecasts:")
         for item in evidence.forecasts:
+            lines.append(f"- [{item.id}] {item.text}")
+    if evidence.customer_behaviors:
+        lines.append("Customer behavior:")
+        for item in evidence.customer_behaviors:
             lines.append(f"- [{item.id}] {item.text}")
     if evidence.workflows:
         lines.append("Workflows:")
@@ -161,7 +166,7 @@ async def execute(
     # 2. Run capabilities.
     all_items: dict[str, list] = {
         "chunk": [], "row": [], "kpi": [], "anomaly": [], "forecast": [],
-        "workflow": [],
+        "customer_behavior": [], "workflow": [],
     }
     for step in result.plan.steps:
         if step.capability == "workflow" and "user_id" not in step.parameters:
@@ -204,6 +209,9 @@ async def execute(
     result.evidence.kpis = _cap(all_items["kpi"], "kpi")
     result.evidence.anomalies = _cap(all_items["anomaly"], "anomaly")
     result.evidence.forecasts = _cap(all_items["forecast"], "forecast")
+    result.evidence.customer_behaviors = _cap(
+        all_items["customer_behavior"], "customer_behavior"
+    )
     result.evidence.workflows = _cap(all_items["workflow"], "workflow")
 
     # 3b. Scan retrieved content for injection signals.

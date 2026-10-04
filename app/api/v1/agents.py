@@ -244,9 +244,9 @@ async def agent_upload_content(
     """
     The agent pushes file content for a specific content_hash.
 
-    The agent must have a job for this hash. The upload stores the bytes,
-    links them to the source, and triggers ingestion for the job if this
-    was the last pending file in the batch.
+    The agent must have a job for this hash. The upload stores the bytes
+    and links them to the source; the ingestion worker processes the
+    pending job afterward.
     """
     from app.services.storage.local import storage
     if agent.id != agent_id:
@@ -354,11 +354,6 @@ async def agent_upload_content(
         message=f"file delivered: {pending.path}",
     )
 
-    await db.commit()
-
-    # If all pending uploads for this ingestion job are done, run the job.
-    from app.services.agents.jobs import _maybe_trigger_ingestion
-    await _maybe_trigger_ingestion(db, ingestion_job_id=ingestion_job.id)
     await db.commit()
 
     return {"status": "delivered", "content_hash": actual_hash}

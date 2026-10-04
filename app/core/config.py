@@ -1,4 +1,5 @@
 # app/core/config.py
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -68,6 +69,18 @@ class Settings(BaseSettings):
             raise ValueError("SQL_STREAM_BATCH_SIZE must be positive")
         if self.retrieval_sql_candidate_limit < 1:
             raise ValueError("RETRIEVAL_SQL_CANDIDATE_LIMIT must be positive")
+        if (
+            self.customer_behavior_recent_days < 1
+            or self.customer_behavior_at_risk_days < self.customer_behavior_recent_days
+            or self.customer_behavior_inactive_days < self.customer_behavior_at_risk_days
+            or self.customer_behavior_min_purchase_count < 1
+            or self.customer_behavior_champion_purchase_count
+            < self.customer_behavior_min_purchase_count
+            or self.customer_behavior_trend_threshold_pct <= 0
+            or not 0 < self.customer_behavior_high_value_percentile <= 100
+            or self.customer_behavior_row_limit < 1
+        ):
+            raise ValueError("customer behavior thresholds and row limit are invalid")
         return self
 
     # Storage
@@ -100,13 +113,25 @@ class Settings(BaseSettings):
     embedding_provider: str = "local"
     embedding_model: str = "intfloat/multilingual-e5-large"
     embedding_dimensions: int = 1024
-    fastembed_cache_dir: str | None = None
+    fastembed_cache_dir: str = str(
+        Path.home() / ".cache" / "sansa" / "fastembed"
+    )
     embedding_batch_size: int = 32
     retrieval_default_top_k: int = 10
     retrieval_vector_weight: float = 0.5
     retrieval_keyword_weight: float = 0.3
     retrieval_sql_weight: float = 0.2
     retrieval_sql_candidate_limit: int = 2000
+
+    # Deterministic customer behavior segmentation
+    customer_behavior_recent_days: int = 30
+    customer_behavior_at_risk_days: int = 90
+    customer_behavior_inactive_days: int = 180
+    customer_behavior_min_purchase_count: int = 3
+    customer_behavior_champion_purchase_count: int = 5
+    customer_behavior_trend_threshold_pct: float = 20.0
+    customer_behavior_high_value_percentile: float = 75.0
+    customer_behavior_row_limit: int = 100_000
 
     # Chunking
     chunk_target_tokens: int = 400

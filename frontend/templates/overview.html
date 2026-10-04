@@ -6,13 +6,134 @@
   <div>
     <div class="eyebrow">Management intelligence · {{ tenant_name }}</div>
     <h1 class="page-title">Business command center</h1>
-    <p class="page-subtitle">Your latest performance, signals, and decisions in one place.</p>
+    <p class="page-subtitle">
+      {{ user_name }} · {{ "Meridian Transport manager" if demo_source else "Workspace manager" }}
+      {% if demo_source %}
+        <span class="demo-data-disclosure">Synthetic demo records · inspect the source CSVs in Excel.</span>
+      {% endif %}
+    </p>
   </div>
   <div class="command-status">
-    <span class="status-indicator" aria-hidden="true"></span>
-    <span>Workspace view</span>
+    {% if demo_source %}
+      <span class="demo-environment-mark" aria-hidden="true">D</span>
+      <span>Demo environment</span>
+    {% else %}
+      <span class="status-indicator" aria-hidden="true"></span>
+      <span>Workspace view</span>
+    {% endif %}
   </div>
 </header>
+
+{% if demo_source %}
+<section class="section panel demo-lineage-panel" aria-labelledby="demo-lineage-title">
+  <header class="section-header">
+    <div>
+      <div class="eyebrow">Data provenance</div>
+      <h2 class="section-title" id="demo-lineage-title">From source file to business signal</h2>
+      <p class="row-secondary">
+        These CSVs are the source of the analysis. The watcher
+        reports file hashes first; ingestion happens only after you request it.
+      </p>
+    </div>
+    <a class="section-action" href="/datasets/{{ demo_source.id }}">Open source record</a>
+  </header>
+
+  <div class="demo-lineage-flow" aria-label="File processing steps">
+    <div class="demo-lineage-step">
+      <span class="demo-lineage-number">01</span>
+      <span><strong>CSV files</strong><small>Prepared for Excel</small></span>
+    </div>
+    <span class="demo-lineage-arrow" aria-hidden="true">→</span>
+    <div class="demo-lineage-step">
+      <span class="demo-lineage-number">02</span>
+      <span>
+        <strong>Filesystem watcher</strong>
+        <small>
+          {% if demo_agent and demo_agent.status == "active" %}
+            Connected · {{ demo_observed_file_count }}/{{ demo_files|length }} seen
+          {% else %}
+            {{ "Enrolled, awaiting registration" if demo_agent else "Not enrolled yet" }}
+          {% endif %}
+        </small>
+      </span>
+    </div>
+    <span class="demo-lineage-arrow" aria-hidden="true">→</span>
+    <div class="demo-lineage-step">
+      <span class="demo-lineage-number">03</span>
+      <span><strong>Platform ingestion</strong><small>{{ demo_ingested_row_count }} rows staged</small></span>
+    </div>
+  </div>
+
+  {% if demo_has_ingestion_jobs %}
+    <div class="demo-queue-progress" data-demo-queue
+      data-jobs-url="/api/v1/datasets/{{ demo_source.id }}/jobs"
+      data-file-total="{{ demo_queue_file_total }}"
+      role="group" aria-label="CSV ingestion progress">
+      <div class="demo-queue-progress-heading">
+        <span data-demo-queue-label>
+          {{ demo_file_completed_count + demo_file_failed_count }}/{{ demo_queue_file_total }} ingestion jobs complete
+        </span>
+        <span class="demo-queue-progress-detail" data-demo-queue-detail>
+          {{ demo_file_failed_count }} failed · {{ demo_queue_file_total - demo_file_completed_count - demo_file_failed_count }} remaining
+        </span>
+      </div>
+      <progress class="demo-queue-progress-bar{% if demo_file_failed_count %} has-failures{% endif %}"
+        data-demo-queue-bar
+        max="{{ demo_queue_file_total }}"
+        value="{{ demo_file_completed_count + demo_file_failed_count }}"
+        aria-label="CSV files processed"></progress>
+    </div>
+  {% else %}
+    <div class="demo-queue-progress" data-demo-queue
+      data-jobs-url="/api/v1/datasets/{{ demo_source.id }}/jobs"
+      data-file-total="0"
+      role="group" aria-label="CSV ingestion progress" hidden>
+      <div class="demo-queue-progress-heading">
+        <span data-demo-queue-label>0 ingestion jobs complete</span>
+        <span class="demo-queue-progress-detail" data-demo-queue-detail>Waiting for upload</span>
+      </div>
+      <progress class="demo-queue-progress-bar" data-demo-queue-bar
+        max="1" value="0" aria-label="CSV ingestion jobs complete"></progress>
+    </div>
+  {% endif %}
+
+  <div class="demo-file-list">
+    {% for file in demo_files %}
+      <div class="demo-file-row" data-demo-file-row data-path="{{ file.name }}"
+        data-job-status="{{ file.job_status or '' }}">
+        <span class="demo-file-mark" aria-hidden="true">CSV</span>
+        <span class="demo-file-name mono">{{ file.name }}</span>
+        <span class="demo-file-status" data-demo-file-status>{{ file.status }}</span>
+        {% if file.hash_prefix %}
+          <span class="demo-file-hash mono" title="SHA-256: {{ file.hash_prefix }}…">
+            SHA-256 {{ file.hash_prefix }}…
+          </span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="demo-lineage-footer">
+    {% if demo_agent and demo_agent.status == "active" and demo_ready_file_count %}
+      <button class="btn btn-primary" type="button" data-demo-ingest
+        data-ingest-url="/api/v1/datasets/{{ demo_source.id }}/ingest">
+        Ask watcher to upload {{ demo_ready_file_count }} file{{ "" if demo_ready_file_count == 1 else "s" }}
+      </button>
+      <span class="row-secondary">The registered watcher must be running in its own terminal.</span>
+    {% elif demo_agent and demo_agent.status == "active" and demo_observed_file_count == demo_files|length %}
+      <span class="badge badge-success">All current source files are ingested</span>
+      <span class="row-secondary">A changed file will be detected and can be ingested again.</span>
+    {% elif demo_agent and demo_agent.status == "active" %}
+      <span class="badge badge-info">Watcher registered</span>
+      <span class="row-secondary">Keep the watcher running; refresh after its first scan.</span>
+    {% else %}
+      <span class="badge badge-neutral">Waiting for watcher enrollment</span>
+      <span class="row-secondary">The setup guide below explains how to enroll it.</span>
+    {% endif %}
+    <span class="demo-ingest-result" data-demo-ingest-result role="status" aria-live="polite"></span>
+  </div>
+</section>
+{% endif %}
 
 <section class="command-metrics" aria-label="Business snapshot">
   {% for k in kpis[:3] %}
@@ -140,6 +261,92 @@
         </a>
       {% endfor %}
     </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if customer_behavior or customer_behavior_error %}
+<section class="section panel customer-behavior-panel" aria-labelledby="customer-health-title">
+  <header class="section-header">
+    <div>
+      <div class="eyebrow">Customer intelligence</div>
+      <h2 class="section-title" id="customer-health-title">Customer health</h2>
+    </div>
+    {% if customer_behavior %}
+      <span class="row-meta">As of {{ customer_behavior.as_of_date.strftime("%b %d, %Y") }}</span>
+    {% endif %}
+  </header>
+
+  {% if customer_behavior %}
+    <div class="customer-health-summary">
+      <article class="customer-health-stat">
+        <span class="caption">Customers analyzed</span>
+        <strong>{{ customer_behavior.customer_count }}</strong>
+        <span class="row-secondary">{{ customer_behavior.transaction_count }} unique purchases</span>
+      </article>
+      <article class="customer-health-stat customer-health-stat-warning">
+        <span class="caption">At risk or inactive</span>
+        <strong>{{ customer_behavior.at_risk_count + customer_behavior.inactive_count }}</strong>
+        <span class="row-secondary">Based on purchase recency and frequency</span>
+      </article>
+      <article class="customer-health-stat">
+        <span class="caption">High-value accounts declining</span>
+        <strong>{{ customer_behavior.high_value_declining_count }}</strong>
+        <span class="row-secondary">
+          Top 10 account revenue share
+          {% if customer_behavior.top_10_revenue_share_pct is not none %}
+            · {{ "%.1f"|format(customer_behavior.top_10_revenue_share_pct) }}%
+          {% else %}· unavailable{% endif %}
+        </span>
+      </article>
+    </div>
+
+    <div class="customer-health-detail">
+      <div class="customer-segment-chart" aria-label="Customer segments">
+        {% for segment in customer_segment_bars %}
+          <div class="customer-segment-row">
+            <span class="customer-segment-label">{{ segment.label }}</span>
+            <div class="customer-segment-track"
+                 role="progressbar"
+                 aria-label="{{ segment.label }} customers"
+                 aria-valuemin="0"
+                 aria-valuemax="{{ customer_behavior.customer_count }}"
+                 aria-valuenow="{{ segment.count }}">
+              <span class="customer-segment-fill customer-segment-{{ segment.key }}"
+                    data-percent="{{ segment.percent|default(0, true) }}"></span>
+            </div>
+            <span class="customer-segment-count">{{ segment.count }}</span>
+          </div>
+        {% endfor %}
+      </div>
+
+      {% if customer_attention_profiles %}
+        <div class="customer-attention">
+          <div class="caption">Worth a closer look</div>
+          {% for profile in customer_attention_profiles %}
+            <div class="customer-attention-row">
+              <span class="customer-attention-name">{{ profile.customer_key }}</span>
+              <span class="badge badge-{{ 'danger' if profile.segment == 'inactive' else 'warning' if profile.segment == 'at_risk' else 'neutral' }}">
+                {{ profile.segment|replace("_", " ")|title }}
+              </span>
+              <span class="customer-attention-meta">
+                {{ profile.recency_days }}d since purchase
+                {% if profile.trend_pct is not none %}
+                  · {{ "%+.0f"|format(profile.trend_pct) }}% trend
+                {% endif %}
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if customer_behavior.rows_skipped %}
+        <p class="customer-health-footnote">
+          {{ customer_behavior.rows_skipped }} incomplete transaction row{{ "" if customer_behavior.rows_skipped == 1 else "s" }} excluded.
+        </p>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="customer-health-error">{{ customer_behavior_error }}</p>
   {% endif %}
 </section>
 {% endif %}
