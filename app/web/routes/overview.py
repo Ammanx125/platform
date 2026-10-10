@@ -140,7 +140,7 @@ async def overview(
                 .order_by(FileObservation.last_seen_at.desc())
             )
         ).scalars().all()
-        latest_observation_by_path = {}
+        latest_observation_by_path: dict[str, FileObservation] = {}
         for observation in observations:
             latest_observation_by_path.setdefault(observation.path, observation)
 
@@ -154,9 +154,9 @@ async def overview(
                 .order_by(IngestionJob.created_at.desc())
             )
         ).scalars().all()
-        latest_job_by_file = {}
+        latest_job_by_file: dict[str, IngestionJob] = {}
         for job in ingestion_jobs:
-            if job.pending_path in file_names:
+            if job.pending_path is not None and job.pending_path in file_names:
                 latest_job_by_file.setdefault(
                     job.pending_path, job
                 )
@@ -165,14 +165,12 @@ async def overview(
         demo_has_ingestion_jobs = bool(latest_job_by_file)
         demo_queue_file_total = len(latest_job_by_file)
         demo_file_completed_count = sum(
-            1
+            job.status == "succeeded"
             for job in latest_job_by_file.values()
-            if job.status == "succeeded"
         )
         demo_file_failed_count = sum(
-            1
+            job.status == "failed"
             for job in latest_job_by_file.values()
-            if job.status == "failed"
         )
         classification = await classify_observations(
             db, tenant_id=tenant_id, source_id=demo_source.id
@@ -188,26 +186,29 @@ async def overview(
         }
         demo_ready_file_count = len(ready_pairs - claimed_pairs)
         for file_name in file_names:
-            observation = latest_observation_by_path.get(file_name)
-            job = latest_job_by_file.get(file_name)
-            if job and job.status == "succeeded":
-                file_status = f"Ingested · {job.rows_staged} rows"
-            elif job and job.status in {"pending", "running"}:
+            latest_observation = latest_observation_by_path.get(file_name)
+            latest_job = latest_job_by_file.get(file_name)
+            if latest_job and latest_job.status == "succeeded":
+                file_status = f"Ingested · {latest_job.rows_staged} rows"
+            elif latest_job and latest_job.status in {"pending", "running"}:
                 file_status = "Upload or ingestion in progress"
-            elif job and job.status == "failed":
+            elif latest_job and latest_job.status == "failed":
                 file_status = (
-                    f"Ingestion failed · {job.error_message or 'see job details'}"
+                    f"Ingestion failed · {latest_job.error_message or 'see job details'}"
                 )
-            elif observation:
+            elif latest_observation:
                 file_status = "Seen by watcher · ready to ingest"
             else:
                 file_status = "Waiting for watcher scan"
             demo_files.append({
                 "name": file_name,
                 "status": file_status,
-                "job_status": job.status if job else None,
-                "hash_prefix": observation.content_hash[:12] if observation else None,
-                "observed": observation is not None,
+                "job_status": latest_job.status if latest_job else None,
+                "hash_prefix": (
+                    latest_observation.content_hash[:12]
+                    if latest_observation else None
+                ),
+                "observed": latest_observation is not None,
             })
         demo_observed_file_count = sum(
             1 for file in demo_files if file["observed"]

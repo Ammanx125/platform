@@ -48,6 +48,7 @@ _EVIDENCE_CAPS = {
     "forecast": 100,
     "customer_behavior": 10,
     "workflow": 5,
+    "email_summary": 5,
 }
 
 def _cap(items: list, kind: str) -> list:
@@ -104,6 +105,10 @@ def _render_prompt(request: OrchestratorRequest, evidence: Evidence) -> str:
     if evidence.workflows:
         lines.append("Workflows:")
         for item in evidence.workflows:
+            lines.append(f"- [{item.id}] {item.text}")
+    if evidence.email_summaries:
+        lines.append("Email inbox summary:")
+        for item in evidence.email_summaries:
             lines.append(f"- [{item.id}] {item.text}")
     if evidence.capability_errors:
         lines.append("Capability errors:")
@@ -166,7 +171,7 @@ async def execute(
     # 2. Run capabilities.
     all_items: dict[str, list] = {
         "chunk": [], "row": [], "kpi": [], "anomaly": [], "forecast": [],
-        "customer_behavior": [], "workflow": [],
+        "customer_behavior": [], "workflow": [], "email_summary": [],
     }
     for step in result.plan.steps:
         if step.capability == "workflow" and "user_id" not in step.parameters:
@@ -213,6 +218,9 @@ async def execute(
         all_items["customer_behavior"], "customer_behavior"
     )
     result.evidence.workflows = _cap(all_items["workflow"], "workflow")
+    result.evidence.email_summaries = _cap(
+        all_items["email_summary"], "email_summary"
+    )
 
     # 3b. Scan retrieved content for injection signals.
     from app.services.security.prompt_safety import scan

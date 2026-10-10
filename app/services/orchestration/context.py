@@ -92,6 +92,7 @@ class Evidence:
     forecasts: list[EvidenceItem] = field(default_factory=list)
     customer_behaviors: list[EvidenceItem] = field(default_factory=list)
     workflows: list[EvidenceItem] = field(default_factory=list)
+    email_summaries: list[EvidenceItem] = field(default_factory=list)
     capability_errors: list[dict[str, Any]] = field(default_factory=list)
 
     def all_items(self) -> list[EvidenceItem]:
@@ -102,6 +103,7 @@ class Evidence:
             *self.forecasts,
             *self.customer_behaviors,
             *self.workflows,
+            *self.email_summaries,
         ]
 
     def to_dict(self) -> dict[str, Any]:
@@ -117,6 +119,7 @@ class Evidence:
             "forecasts": [_wrap(i) for i in self.forecasts],
             "customer_behaviors": [_wrap(i) for i in self.customer_behaviors],
             "workflows": [_wrap(i) for i in self.workflows],
+            "email_summaries": [_wrap(i) for i in self.email_summaries],
             "capability_errors": self.capability_errors,
         }
 

@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}{{ account.email_address }} · Email · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <h1 class="page-title">{{ account.email_address }}</h1>
+  <p class="page-subtitle">
+    {{ account.provider }} · {{ account.status }}
+    {% if account.last_sync_at %}· last sync {{ account.last_sync_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+  </p>
+</header>
+
+<section class="section">
+  <div class="btn-row">
+    <button
+      class="btn btn-primary"
+      id="sync-button"
+      type="button"
+      data-sync-url="/api/v1/email/accounts/{{ account.id }}/sync"
+    >Sync now</button>
+    <span id="sync-status" class="muted" role="status" aria-live="polite"></span>
+  </div>
+</section>
+
+<section class="section">
+  <form class="email-filters" method="get">
+    <div class="field">
+      <label class="field-label" for="intent-filter">Intent</label>
+      <select class="select" id="intent-filter" name="intent">
+        <option value="">All intents</option>
+        {% for i in ["complaint","inquiry","order","invoice","support","feedback","internal","unknown"] %}
+        <option value="{{ i }}" {% if i == intent_filter %}selected{% endif %}>{{ i }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label class="field-label" for="urgency-filter">Urgency</label>
+      <select class="select" id="urgency-filter" name="urgency">
+        <option value="">All urgency</option>
+        {% for u in ["urgent","high","normal","low"] %}
+        <option value="{{ u }}" {% if u == urgency_filter %}selected{% endif %}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">Filter</button>
+  </form>
+</section>
+
+<section class="section">
+  <div class="table-wrap">
+    {% if messages %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Received</th><th>From</th><th>Subject</th><th>Intent</th><th>Urgency</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for m in messages %}
+          <tr>
+            <td class="cell-mono muted text-xs">
+              {{ m.received_at.strftime("%Y-%m-%d %H:%M") if m.received_at else "—" }}
+            </td>
+            <td>{{ m.from_name or m.from_address or "" }}</td>
+            <td>
+              {{ m.subject }}
+              {% if m.snippet %}<div class="muted text-xs">{{ m.snippet }}</div>{% endif %}
+            </td>
+            <td>{{ m.intent or "—" }}</td>
+            <td>{{ m.urgency or "—" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">
+        <div class="empty-title">No emails match these filters</div>
+        <div class="empty-detail">Sync the mailbox to pull recent messages, or adjust the filters.</div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+(function () {
+  "use strict";
+
+  var button = document.getElementById("sync-button");
+  var status = document.getElementById("sync-status");
+
+  function readCookie(name) {
+    var prefix = name + "=";
+    var cookies = document.cookie ? document.cookie.split("; ") : [];
+    for (var i = 0; i < cookies.length; i++) {
+      if (cookies[i].indexOf(prefix) === 0) {
+        return decodeURIComponent(cookies[i].substring(prefix.length));
+      }
+    }
+    return null;
+  }
+
+  button.addEventListener("click", async function () {
+    var csrf = readCookie(window.SANSA_CSRF_COOKIE || "sansa_csrf");
+    if (!csrf) {
+      status.textContent = "Could not start sync: refresh the page to renew the security token.";
+      return;
+    }
+    button.disabled = true;
+    status.textContent = "Requesting mailbox sync…";
+    try {
+      var headers = {};
+      headers[window.SANSA_CSRF_HEADER || "X-CSRF-Token"] = csrf;
+      var response = await fetch(button.dataset.syncUrl, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: headers
+      });
+      var data = await response.json();
+      if (!response.ok) {
+        var detail = typeof data.detail === "string"
+          ? data.detail
+          : "Request failed (HTTP " + response.status + ").";
+        throw new Error(detail);
+      }
+      status.textContent = "Sync queued. Refresh this page in a moment to see new messages.";
+    } catch (error) {
+      status.textContent = "Could not start sync: " + error.message;
+      button.disabled = false;
+    }
+  });
+}());
+</script>
+
+{% endblock %}

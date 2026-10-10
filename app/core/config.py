@@ -52,6 +52,19 @@ class Settings(BaseSettings):
             raise ValueError(
                 "COOKIE_SECURE must be true in production environments"
             )
+        if self.environment.lower() in {"prod", "production"}:
+            if not self.google_oauth_client_id:
+                raise ValueError(
+                    "GOOGLE_OAUTH_CLIENT_ID is required in production"
+                )
+            if not self.google_oauth_client_secret:
+                raise ValueError(
+                    "GOOGLE_OAUTH_CLIENT_SECRET is required in production"
+                )
+            if not self.email_oauth_redirect_uri.startswith("https://"):
+                raise ValueError(
+                    "EMAIL_OAUTH_REDIRECT_URI must be https in production"
+                )
         if self.redis_url == "":
             self.redis_url = None
         if self.redis_url is not None:
@@ -175,6 +188,27 @@ class Settings(BaseSettings):
     agent_max_upload_bytes: int = 200 * 1024 * 1024
     agent_job_batch_size: int = 20
     agent_job_in_progress_timeout_seconds: int = 300
+
+    # Email (Gmail / Microsoft Graph)
+    # Single OAuth app per Sansa deployment. The client_id is public; the
+    # client_secret is a deployment secret read directly from env, like
+    # llm_api_key. Per-tenant tokens live encrypted on EmailAccount, not here.
+    email_oauth_redirect_uri: str = (
+        "http://localhost:8000/api/v1/email/oauth/callback"
+    )
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    google_oauth_scopes: list[str] = [
+        # Read-only inbox access.
+        "https://www.googleapis.com/auth/gmail.readonly",
+        # Create drafts AND send messages the app created. Covers the
+        # draft -> approve -> send flow without granting gmail.send.
+        "https://www.googleapis.com/auth/gmail.compose",
+    ]
+
+    # Email ingestion and OAuth state
+    email_sync_max_messages_per_job: int = 50
+    email_oauth_state_ttl_minutes: int = 15
 
 
 # BaseSettings loads required values from the environment at runtime.

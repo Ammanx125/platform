@@ -56,6 +56,13 @@ _CUSTOMER_BEHAVIOR_TOKENS = frozenset({
     "customer", "customers", "client", "clients", "churn", "retention",
     "rfm", "champion", "champions", "loyal", "declining", "risk",
 })
+_EMAIL_TOKENS = frozenset({
+    "email", "emails", "inbox", "mail", "message", "messages",
+})
+_COMPLAINT_COUNT_TOKENS = frozenset({
+    "how", "many", "count", "counts", "received", "get", "got",
+    "today", "week", "month",
+})
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -79,6 +86,32 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
     wants_trend = bool(toks & _TREND_TOKENS)
     wants_metric = bool(toks & _METRIC_TOKENS)
     wants_customer_behavior = bool(toks & _CUSTOMER_BEHAVIOR_TOKENS)
+    wants_complaint_count = (
+        bool(toks & {"complaint", "complaints"})
+        and bool(toks & _COMPLAINT_COUNT_TOKENS)
+    )
+    wants_email_summary = bool(toks & _EMAIL_TOKENS) or wants_complaint_count
+
+    if wants_email_summary:
+        query_lower = request.query.lower()
+        window_hours = 24
+        if "today" in toks:
+            window_hours = 24
+        elif (
+            ("week" in toks and bool(toks & {"this", "last", "past"}))
+            or "7 days" in query_lower
+        ):
+            window_hours = 168
+        elif (
+            ("month" in toks and bool(toks & {"this", "last", "past"}))
+            or "30 days" in query_lower
+        ):
+            window_hours = 720
+        steps.append(PlanStep(
+            capability="email_summary",
+            reason="query asks about inbox contents or email complaint counts",
+            parameters={"window_hours": window_hours},
+        ))
 
     # Retrieval is cheap and almost always useful for a "why" question.
     if wants_why or wants_trend:
@@ -121,9 +154,15 @@ def _rules_plan(request: OrchestratorRequest) -> Plan | None:
     # health/status questions; more specific workflow matches can also take
     # precedence over generic capability rules.
     matched_workflows = match_workflows(request.query)
-    if matched_workflows and not wants_customer_behavior and not wants_forecast and (
-        not steps
-        or workflow_match_score(request.query, matched_workflows[0]) >= 2
+    if (
+        matched_workflows
+        and not wants_customer_behavior
+        and not wants_forecast
+        and not wants_email_summary
+        and (
+            not steps
+            or workflow_match_score(request.query, matched_workflows[0]) >= 2
+        )
     ):
         # Workflow matching returns the strongest trigger match first.
         wf_key = matched_workflows[0]
@@ -156,6 +195,9 @@ _ROUTING_SYSTEM = (
     "  - kpi: evaluate named metrics (e.g. total spend, gross margin)\n"
     "  - anomaly: find anomalous points in time series\n"
     "  - forecast: project a series into the future\n"
+    "  - email_summary: summarize inbox email counts by intent and urgency. "
+    "    Set parameters.window_hours to a rolling UTC window (today=24, "
+    "this week=168, last month=720; default=24).\n"
     "  - workflow: run a domain-specific multi-step process. If you "
     "    choose this, set parameters.workflow_key to one of the "
     "    registered workflows (the caller will provide the list).\n"

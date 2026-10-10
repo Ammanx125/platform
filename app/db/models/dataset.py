@@ -14,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    literal_column,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -27,7 +28,8 @@ class DataSource(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     A registered data source belonging to one tenant.
 
     source_type is one of: 'csv', 'excel' (Step 4a);
-    'sql', 'http', 'webhook' (Step 4b); 'agent' (on-prem file source).
+    'sql', 'http', 'webhook' (Step 4b); 'agent' (on-prem file source);
+    'email_gmail', 'email_graph' (OAuth mailbox connections).
 
     config holds connector-specific settings (SQL URL ref, HTTP endpoint,
     auth reference id, etc). Never store raw credentials here — store a
@@ -175,7 +177,10 @@ class StagedRow(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         UniqueConstraint("job_id", "row_number", name="uq_staged_rows_job_row"),
         Index(
             "ix_staged_rows_search_text_gin",
-            func.to_tsvector("simple", search_text),
+            func.to_tsvector(
+                literal_column("'simple'::regconfig"),
+                search_text,
+            ),
             postgresql_using="gin",
         ),
     )

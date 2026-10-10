@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Email · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <h1 class="page-title">Email</h1>
+  <p class="page-subtitle">Connect a mailbox so Sansa can read, classify, and help you reply.</p>
+</header>
+
+<section class="section">
+  <div class="section-header">
+    <h2 class="section-title">Connect a mailbox</h2>
+  </div>
+  <form id="connect-form">
+    <div class="field">
+      <label class="field-label" for="connection-name">Connection name</label>
+      <input
+        class="input"
+        id="connection-name"
+        type="text"
+        name="name"
+        value="Inbox"
+        required
+        maxlength="200"
+      >
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" type="submit">Connect Gmail</button>
+      <span id="connect-status" class="muted" role="status" aria-live="polite"></span>
+    </div>
+  </form>
+</section>
+
+<section class="section">
+  <div class="section-header">
+    <h2 class="section-title">Connected mailboxes</h2>
+  </div>
+  <div class="table-wrap">
+    {% if accounts %}
+      <table class="table">
+        <thead>
+          <tr><th>Address</th><th>Provider</th><th>Status</th><th>Last sync</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for a in accounts %}
+          <tr>
+            <td>{{ a.email_address }}</td>
+            <td>{{ a.provider }}</td>
+            <td><span class="badge badge-neutral">{{ a.status }}</span></td>
+            <td class="cell-mono muted text-xs">
+              {{ a.last_sync_at.strftime("%Y-%m-%d %H:%M") if a.last_sync_at else "Never" }}
+            </td>
+            <td><a href="/email/accounts/{{ a.id }}">Open</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">
+        <div class="empty-title">No mailboxes connected</div>
+        <div class="empty-detail">Connect a Gmail mailbox to begin syncing email.</div>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+(function () {
+  "use strict";
+
+  var form = document.getElementById("connect-form");
+  var status = document.getElementById("connect-status");
+  var button = form.querySelector('button[type="submit"]');
+
+  function readCookie(name) {
+    var prefix = name + "=";
+    var cookies = document.cookie ? document.cookie.split("; ") : [];
+    for (var i = 0; i < cookies.length; i++) {
+      if (cookies[i].indexOf(prefix) === 0) {
+        return decodeURIComponent(cookies[i].substring(prefix.length));
+      }
+    }
+    return null;
+  }
+
+  form.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var csrfName = window.SANSA_CSRF_COOKIE || "sansa_csrf";
+    var csrfHeader = window.SANSA_CSRF_HEADER || "X-CSRF-Token";
+    var csrf = readCookie(csrfName);
+    if (!csrf) {
+      status.textContent = "Could not start connection: refresh the page to renew the security token.";
+      return;
+    }
+
+    button.disabled = true;
+    status.textContent = "Starting secure Google sign-in…";
+    try {
+      var response = await fetch("/api/v1/email/connect", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          [csrfHeader]: csrf
+        },
+        body: JSON.stringify({
+          name: form.elements.namedItem("name").value.trim() || "Inbox",
+          provider: "gmail"
+        })
+      });
+      var data = await response.json();
+      if (!response.ok) {
+        var detail = typeof data.detail === "string"
+          ? data.detail
+          : "Request failed (HTTP " + response.status + ").";
+        throw new Error(detail);
+      }
+      if (!data.authorize_url) {
+        throw new Error("The server did not return a Google authorization URL.");
+      }
+      window.location.assign(data.authorize_url);
+    } catch (error) {
+      status.textContent = "Could not start connection: " + error.message;
+      button.disabled = false;
+    }
+  });
+}());
+</script>
+
+{% endblock %}

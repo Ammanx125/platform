@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Could not connect mailbox · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <h1 class="page-title">Could not connect mailbox</h1>
+  {% if reason == "provider_error" %}
+    <p class="page-subtitle">Google could not complete authorization. You can try connecting again.</p>
+  {% elif reason == "missing_params" %}
+    <p class="page-subtitle">The authorization response was incomplete. Please try connecting again.</p>
+  {% elif reason == "exchange_failed" %}
+    <p class="page-subtitle">The authorization could not be verified or exchanged. Please start a new connection.</p>
+  {% else %}
+    <p class="page-subtitle">The mailbox connection could not be completed. Please try again.</p>
+  {% endif %}
+  <p><a class="btn" href="/email">Back to email</a></p>
+</header>
+
+{% endblock %}

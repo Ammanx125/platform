@@ -386,6 +386,72 @@ class CustomerBehaviorCapability:
         )]
 
 
+# ---------- email summary ----------
+
+class EmailSummaryCapability:
+    """
+    Aggregate inbound email over a rolling window.
+
+    Returns one EvidenceItem with counts by intent and urgency, top senders,
+    and high-urgency messages. It does not report unanswered messages because
+    sent replies are not yet linked to their parent messages.
+    """
+    name = "email_summary"
+
+    async def run(
+        self,
+        *,
+        db: AsyncSession,
+        tenant_id: uuid.UUID,
+        step_params: dict[str, Any],
+        query: str,
+        source_ids: list[uuid.UUID] | None,
+    ) -> list[EvidenceItem]:
+        from app.services.email.summary import (
+            DEFAULT_WINDOW_HOURS,
+            summarize_inbox,
+        )
+
+        raw_hours = step_params.get("window_hours", DEFAULT_WINDOW_HOURS)
+        try:
+            window_hours = int(raw_hours)
+        except (TypeError, ValueError) as exc:
+            raise CapabilityError(
+                f"window_hours must be an integer, got {raw_hours!r}"
+            ) from exc
+
+        try:
+            summary = await summarize_inbox(
+                db,
+                tenant_id=tenant_id,
+                source_ids=source_ids,
+                window_hours=window_hours,
+            )
+        except ValueError as exc:
+            raise CapabilityError(f"email_summary: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001
+            raise CapabilityError(f"email_summary failed: {exc}") from exc
+
+        data = summary.to_evidence_data()
+        for msg in data["high_urgency_messages"]:
+            if msg.get("subject"):
+                msg["subject"] = wrap_untrusted(msg["subject"])
+            if msg.get("from_name"):
+                msg["from_name"] = wrap_untrusted(msg["from_name"])
+        for sender in data["top_senders"]:
+            if sender.get("from_address"):
+                sender["from_address"] = wrap_untrusted(
+                    sender["from_address"]
+                )
+
+        return [EvidenceItem(
+            kind="email_summary",
+            id=f"email_summary:{window_hours}h",
+            text=summary.to_evidence_text(),
+            data=data,
+        )]
+
+
 # ---------- registry ----------
 
 CAPABILITIES: dict[str, Capability] = {
@@ -394,6 +460,7 @@ CAPABILITIES: dict[str, Capability] = {
     "anomaly": AnomalyCapability(),
     "forecast": ForecastCapability(),
     "customer_behavior": CustomerBehaviorCapability(),
+    "email_summary": EmailSummaryCapability(),
 }
 
 

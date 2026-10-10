@@ -152,7 +152,9 @@ def write_xlsx(path: Path, rows: list[dict[str, Any]]) -> None:
     try:
         from openpyxl import Workbook
     except ImportError:
-        raise SystemExit("openpyxl not installed; run `pip install openpyxl`")
+        raise SystemExit(
+            "openpyxl not installed; run `pip install openpyxl`"
+        ) from None
     path.parent.mkdir(parents=True, exist_ok=True)
     wb = Workbook()
     ws = wb.active

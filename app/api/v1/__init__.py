@@ -8,6 +8,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.datasets import router as datasets_router
 from app.api.v1.decisions import router as decisions_router
+from app.api.v1.email import router as email_router
 from app.api.v1.events import router as events_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.mappings import router as mappings_router
@@ -35,3 +36,4 @@ api_router.include_router(workflows_router)
 api_router.include_router(tool_policies_router)
 api_router.include_router(events_router)
 api_router.include_router(agents_router)
+api_router.include_router(email_router)

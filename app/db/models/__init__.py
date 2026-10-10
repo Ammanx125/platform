@@ -14,6 +14,7 @@ from app.db.models.dataset import (
     StagedRow,
 )
 from app.db.models.decision import DecisionRun
+from app.db.models.email import EmailAccount
 from app.db.models.event import Event
 from app.db.models.knowledge import Chunk, Document
 from app.db.models.refresh_token import RefreshToken
@@ -68,4 +69,5 @@ __all__ = [
     "Agent",
     "AgentJob",
     "PendingFileUpload",
+    "EmailAccount",
 ]

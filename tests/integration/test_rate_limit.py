@@ -33,6 +33,9 @@ def test_production_requires_redis() -> None:
             "environment": "production",
             "cookie_secure": True,
             "redis_url": None,
+            "google_oauth_client_id": "test-client-id",
+            "google_oauth_client_secret": "test-client-secret",
+            "email_oauth_redirect_uri": "https://example.com/oauth/callback",
         })
 
 

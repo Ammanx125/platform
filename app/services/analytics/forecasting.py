@@ -154,13 +154,21 @@ async def infer_forecast_specs(
     if value_concept is None:
         matched: list[tuple[int, str]] = []
         for concept in concepts:
-            phrases = [
+            candidate_phrases = [
                 concept.display_name,
                 concept.key.rsplit(".", 1)[-1].replace("_", " "),
                 *(concept.synonyms or []),
             ]
-            if any(_phrase_matches(query, phrase) for phrase in phrases):
-                matched.append((max(len(phrase) for phrase in phrases if _phrase_matches(query, phrase)), concept.key))
+            matching_phrases = [
+                phrase
+                for phrase in candidate_phrases
+                if _phrase_matches(query, phrase)
+            ]
+            if matching_phrases:
+                matched.append((
+                    max(map(len, matching_phrases)),
+                    concept.key,
+                ))
         if matched:
             value_concept = max(matched)[1]
     if value_concept is None:

@@ -29,8 +29,60 @@ def test_production_requires_secure_cookies() -> None:
         "jwt_secret": "x" * 32,
         "cookie_secure": True,
         "redis_url": "redis://localhost:6379/0",
+        "google_oauth_client_id": "client-id",
+        "google_oauth_client_secret": "client-secret",
+        "email_oauth_redirect_uri": "https://example.com/oauth/callback",
     })
     assert settings.cookie_secure
+
+
+def test_production_requires_google_oauth_client_id() -> None:
+    with pytest.raises(
+        ValueError,
+        match="GOOGLE_OAUTH_CLIENT_ID is required in production",
+    ):
+        Settings.model_validate({
+            "environment": "production",
+            "database_url": "postgresql://localhost:5432/db",
+            "jwt_secret": "x" * 32,
+            "cookie_secure": True,
+            "redis_url": "redis://localhost:6379/0",
+            "google_oauth_client_secret": "secret",
+            "email_oauth_redirect_uri": "https://example.com/oauth/callback",
+        })
+
+
+def test_production_requires_google_oauth_client_secret() -> None:
+    with pytest.raises(
+        ValueError,
+        match="GOOGLE_OAUTH_CLIENT_SECRET is required in production",
+    ):
+        Settings.model_validate({
+            "environment": "production",
+            "database_url": "postgresql://localhost:5432/db",
+            "jwt_secret": "x" * 32,
+            "cookie_secure": True,
+            "redis_url": "redis://localhost:6379/0",
+            "google_oauth_client_id": "client-id",
+            "email_oauth_redirect_uri": "https://example.com/oauth/callback",
+        })
+
+
+def test_production_requires_https_oauth_redirect_uri() -> None:
+    with pytest.raises(
+        ValueError,
+        match="EMAIL_OAUTH_REDIRECT_URI must be https in production",
+    ):
+        Settings.model_validate({
+            "environment": "production",
+            "database_url": "postgresql://localhost:5432/db",
+            "jwt_secret": "x" * 32,
+            "cookie_secure": True,
+            "redis_url": "redis://localhost:6379/0",
+            "google_oauth_client_id": "client-id",
+            "google_oauth_client_secret": "secret",
+            "email_oauth_redirect_uri": "http://example.com/oauth/callback",
+        })
 
 
 def test_encrypt_decrypt_round_trip() -> None:

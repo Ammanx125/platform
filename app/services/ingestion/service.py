@@ -242,6 +242,51 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             )
             await db.commit()
             return
+        elif ingestion_source_type in ("email_gmail", "email_graph"):
+            from app.services.email.sync import sync_email_account
+
+            messages_seen, docs_created = await sync_email_account(
+                db,
+                source=source,
+                job=job,
+                lineage_row=lineage_row,
+            )
+            job.rows_read = messages_seen
+            job.rows_staged = docs_created
+            job.status = "succeeded"
+            job.finished_at = datetime.now(UTC)
+            from app.services.events import store as events_store
+            from app.services.events import types as event_types
+
+            await events_store.record_event(
+                db,
+                tenant_id=job.tenant_id,
+                event_type=event_types.INGESTION_COMPLETED,
+                source_id=source.id,
+                payload={
+                    "job_id": str(job.id),
+                    "rows_read": job.rows_read,
+                    "rows_staged": job.rows_staged,
+                    "source_type": source.source_type,
+                },
+                dedup_key=f"ingestion.completed:{job.id}",
+            )
+            await audit_service.emit(
+                db,
+                tenant_id=job.tenant_id,
+                event_type=audit_types.INGESTION_COMPLETED,
+                subject_type="ingestion_job",
+                subject_id=job.id,
+                metadata={
+                    "source_id": str(source.id),
+                    "source_type": source.source_type,
+                    "rows_read": job.rows_read,
+                    "rows_staged": job.rows_staged,
+                },
+                message=f"ingestion completed for {source.name}",
+            )
+            await db.commit()
+            return
         else:
             connector = get_connector(ingestion_source_type)
             result = await connector.ingest(

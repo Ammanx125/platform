@@ -8,10 +8,10 @@ from app.schemas.auth import CreateUserRequest
 @pytest.mark.parametrize("pw", ["abc12", "abcdef", "123456", "a1"])
 def test_rejects_weak_passwords(pw: str) -> None:
     with pytest.raises(ValidationError):
-        CreateUserRequest(email="x@y.test", password=pw)
+        CreateUserRequest(email="x@example.com", password=pw)
 
 
 @pytest.mark.parametrize("pw", ["abc123", "Sansa2026", "Passw0rd"])
 def test_accepts_valid_passwords(pw: str) -> None:
-    req = CreateUserRequest(email="x@y.test", password=pw)
+    req = CreateUserRequest(email="x@example.com", password=pw)
     assert req.password == pw

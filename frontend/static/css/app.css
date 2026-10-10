@@ -556,6 +556,16 @@ html[data-theme="dark"] .btn-primary:hover { color: #1c2920; }
   color: var(--text-muted);
 }
 
+.email-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.email-filters .field { margin-bottom: 0; }
+.email-filters button { justify-self: start; }
+
 /* ==========================================================================
    11. Badges
    ========================================================================== */
