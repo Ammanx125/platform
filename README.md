@@ -146,6 +146,12 @@ The enrollment command prints a one-time token. Copy it for immediate use;
 the platform stores only its hash. Clear the bootstrap credentials in that
 terminal, then open a separate watcher terminal:
 
+If an active or pending Meridian watcher already exists, the command reissues
+its one-time enrollment token and invalidates its previous credential. Stop
+the running watcher, use the newly printed token with `sansa-agent enroll`,
+then start the watcher again. The platform cannot recover a token or
+credential that was already consumed.
+
 ```powershell
 Remove-Item Env:DEMO_ADMIN_EMAIL, Env:DEMO_ADMIN_PASSWORD
 ```

@@ -44,6 +44,7 @@ INGESTION_FAILED = "ingestion.failed"
 
 # --- Agents (emitted by app/services/agents/service.py) ---
 AGENT_ENROLLED = "agent.enrolled"
+AGENT_ENROLLMENT_REISSUED = "agent.enrollment.reissued"
 AGENT_REGISTERED = "agent.registered"
 AGENT_FILE_DELIVERED = "agent.file.delivered"
 AGENT_JOB_COMPLETED = "agent.job.completed"
@@ -64,6 +65,7 @@ ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     INGESTION_COMPLETED,
     INGESTION_FAILED,
     AGENT_ENROLLED,
+    AGENT_ENROLLMENT_REISSUED,
     AGENT_REGISTERED,
     AGENT_FILE_DELIVERED,
     AGENT_JOB_COMPLETED,

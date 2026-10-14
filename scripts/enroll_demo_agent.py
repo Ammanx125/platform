@@ -11,7 +11,11 @@ from app.db.models.dataset import DataSource
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.session import SessionLocal
-from app.services.agents.service import AgentError, create_agent_enrollment
+from app.services.agents.service import (
+    AgentError,
+    create_agent_enrollment,
+    reissue_agent_enrollment,
+)
 
 TENANT_SLUG = "meridian-transport-demo"
 SOURCE_NAME = "Meridian Watcher Files"
@@ -52,29 +56,30 @@ async def create_enrollment(*, email: str) -> tuple[str, str]:
 
         existing = (
             await db.execute(
-                select(Agent.id, Agent.status).where(
+                select(Agent).where(
                     Agent.tenant_id == tenant.id,
                     Agent.source_id == source.id,
                     Agent.status.in_(("pending", "active")),
-                )
+                ).order_by(Agent.created_at.desc())
             )
-        ).first()
-        if existing is not None:
-            raise ValueError(
-                f"Meridian watcher already exists in {existing.status!r} "
-                f"status (agent {existing.id}); refusing to create a second "
-                "agent for the same source"
-            )
-
+        ).scalars().first()
         try:
-            agent, token = await create_agent_enrollment(
-                db,
-                tenant_id=tenant.id,
-                source_id=source.id,
-                name="Meridian Transport File Watcher",
-                description="Watches the visible Meridian demo CSV folder.",
-                enrolled_by_user_id=user.id,
-            )
+            if existing is not None:
+                agent, token = await reissue_agent_enrollment(
+                    db,
+                    agent_id=existing.id,
+                    tenant_id=tenant.id,
+                    enrolled_by_user_id=user.id,
+                )
+            else:
+                agent, token = await create_agent_enrollment(
+                    db,
+                    tenant_id=tenant.id,
+                    source_id=source.id,
+                    name="Meridian Transport File Watcher",
+                    description="Watches the visible Meridian demo CSV folder.",
+                    enrolled_by_user_id=user.id,
+                )
         except AgentError as exc:
             raise ValueError(str(exc)) from exc
         await db.commit()
@@ -85,11 +90,17 @@ def main() -> None:
     email = os.environ.get("DEMO_ADMIN_EMAIL", "").strip()
     if not email:
         raise SystemExit("Set DEMO_ADMIN_EMAIL to the Meridian manager's email.")
-    agent_id, token = asyncio.run(create_enrollment(email=email))
+    try:
+        agent_id, token = asyncio.run(create_enrollment(email=email))
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     print(f"Agent ID: {agent_id}")
     print("One-time enrollment token (expires in 30 minutes):")
     print(token)
-    print("Use it immediately with `sansa-agent enroll`; it will not be shown again.")
+    print(
+        "Use it immediately with `sansa-agent enroll`; it will not be shown "
+        "again. Any previous credential for this agent has been invalidated."
+    )
 
 
 if __name__ == "__main__":

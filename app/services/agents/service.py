@@ -97,6 +97,58 @@ async def create_agent_enrollment(
     return agent, token
 
 
+async def reissue_agent_enrollment(
+    db: AsyncSession,
+    *,
+    agent_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    enrolled_by_user_id: uuid.UUID,
+) -> tuple[Agent, str]:
+    """Issue a fresh one-time token and invalidate the agent's credential."""
+    agent = (
+        await db.execute(
+            select(Agent)
+            .where(
+                Agent.id == agent_id,
+                Agent.tenant_id == tenant_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if agent is None:
+        raise AgentError("agent not found")
+    if agent.status not in {"pending", "active"}:
+        raise AgentError(
+            f"agent is in status {agent.status!r}, expected 'pending' or 'active'"
+        )
+
+    token = secrets.token_urlsafe(32)
+    agent.status = "pending"
+    agent.credential_hash = None
+    agent.enrollment_token_hash = _hash(token)
+    agent.enrollment_expires_at = (
+        datetime.now(UTC) + timedelta(minutes=ENROLLMENT_TTL_MINUTES)
+    )
+    agent.registered_at = None
+    agent.enrolled_by_user_id = enrolled_by_user_id
+    await db.flush()
+
+    await audit_service.emit(
+        db,
+        tenant_id=tenant_id,
+        event_type="agent.enrollment.reissued",
+        actor_user_id=enrolled_by_user_id,
+        subject_type="agent",
+        subject_id=agent.id,
+        metadata={
+            "agent_name": agent.name,
+            "source_id": str(agent.source_id),
+        },
+        message=f"agent {agent.name!r} enrollment reissued",
+    )
+    return agent, token
+
+
 async def register_agent(
     db: AsyncSession,
     *,

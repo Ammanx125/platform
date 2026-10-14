@@ -1,13 +1,13 @@
 Service Date,Depot,Capacity,Occupied Hours,Downtime,Operating Cost
-2026-07-19,Central Depot,560,458,1.20,260.00
-2026-07-26,Central Depot,560,459,1.35,279.50
-2026-08-02,Central Depot,560,460,1.50,300.46
-2026-08-09,Central Depot,560,461,1.20,323.00
-2026-08-16,Central Depot,560,458,1.35,347.22
-2026-08-23,Central Depot,560,459,1.50,373.26
-2026-08-30,Central Depot,560,460,1.20,401.26
-2026-09-06,Central Depot,560,461,1.35,431.35
-2026-09-13,Central Depot,560,458,1.50,463.70
-2026-09-20,Central Depot,560,459,1.20,498.48
-2026-09-27,Central Depot,560,460,1.35,535.87
-2026-10-04,Central Depot,560,461,18.00,576.06
+2026-07-28,Central Depot,560,458,1.20,260.00
+2026-08-04,Central Depot,560,459,1.35,279.50
+2026-08-11,Central Depot,560,460,1.50,300.46
+2026-08-18,Central Depot,560,461,1.20,323.00
+2026-08-25,Central Depot,560,458,1.35,347.22
+2026-09-01,Central Depot,560,459,1.50,373.26
+2026-09-08,Central Depot,560,460,1.20,401.26
+2026-09-15,Central Depot,560,461,1.35,431.35
+2026-09-22,Central Depot,560,458,1.50,463.70
+2026-09-29,Central Depot,560,459,1.20,498.48
+2026-10-06,Central Depot,560,460,1.35,535.87
+2026-10-13,Central Depot,560,461,18.00,576.06

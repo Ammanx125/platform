@@ -4,8 +4,13 @@ Agent enrollment, registration, heartbeat, and sync.
 """
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
+
+from app.db.session import SessionLocal
+from app.services.agents.service import reissue_agent_enrollment
 
 
 def _csrf(client: AsyncClient) -> dict[str, str]:
@@ -178,3 +183,58 @@ async def test_enroll_requires_agent_source(
     )
     assert r.status_code == 400
     assert "agent" in r.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_reissue_enrollment_invalidates_old_credential(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+    response = await client.post(
+        "/api/v1/datasets",
+        json={"name": "Reissue agent source", "source_type": "agent", "config": {}},
+        headers=_csrf(client),
+    )
+    assert response.status_code == 201, response.text
+    source_id = response.json()["id"]
+
+    response = await client.post(
+        "/api/v1/agents/enroll",
+        json={"name": "Reissue Agent", "source_id": source_id},
+        headers=_csrf(client),
+    )
+    assert response.status_code == 201, response.text
+    initial_token = response.json()["enrollment_token"]
+
+    response = await client.post(
+        "/api/v1/agents/register",
+        json={"enrollment_token": initial_token, "agent_metadata": {}},
+    )
+    assert response.status_code == 200, response.text
+    agent_id = response.json()["agent_id"]
+    old_credential = response.json()["credential"]
+
+    async with SessionLocal() as db:
+        agent, fresh_token = await reissue_agent_enrollment(
+            db,
+            agent_id=uuid.UUID(agent_id),
+            tenant_id=two_tenants["tenant_a"],
+            enrolled_by_user_id=two_tenants["user_a"],
+        )
+        assert agent.status == "pending"
+        assert agent.credential_hash is None
+        await db.commit()
+
+    response = await client.post(
+        f"/api/v1/agents/{agent_id}/heartbeat",
+        json={"agent_metadata": {}},
+        headers={"Authorization": f"Bearer {old_credential}"},
+    )
+    assert response.status_code == 401, response.text
+
+    response = await client.post(
+        "/api/v1/agents/register",
+        json={"enrollment_token": fresh_token, "agent_metadata": {}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["agent_id"] == agent_id
