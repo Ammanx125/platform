@@ -7,6 +7,11 @@ from app.db.models.analytics import (
     KPIDefinition,
 )
 from app.db.models.audit import AuditEvent
+from app.db.models.browser import (
+    BrowserAuthorization,
+    BrowserExtractionProfile,
+    BrowserExtractionRun,
+)
 from app.db.models.dataset import (
     DataSource,
     IngestionJob,
@@ -70,4 +75,7 @@ __all__ = [
     "AgentJob",
     "PendingFileUpload",
     "EmailAccount",
+    "BrowserAuthorization",
+    "BrowserExtractionProfile",
+    "BrowserExtractionRun",
 ]

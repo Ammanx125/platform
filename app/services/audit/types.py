@@ -49,6 +49,10 @@ AGENT_REGISTERED = "agent.registered"
 AGENT_FILE_DELIVERED = "agent.file.delivered"
 AGENT_JOB_COMPLETED = "agent.job.completed"
 
+# --- Browser authorizations (emitted by app/services/browser/service.py) ---
+BROWSER_AUTHORIZATION_CREATED = "browser.authorization.created"
+BROWSER_AUTHORIZATION_REVOKED = "browser.authorization.revoked"
+
 
 ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     ACTION_PENDING_APPROVAL,
@@ -69,4 +73,6 @@ ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     AGENT_REGISTERED,
     AGENT_FILE_DELIVERED,
     AGENT_JOB_COMPLETED,
+    BROWSER_AUTHORIZATION_CREATED,
+    BROWSER_AUTHORIZATION_REVOKED,
 })

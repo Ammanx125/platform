@@ -56,6 +56,10 @@ class DataSource(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
         order_by="IngestionJob.created_at.desc()",
     )
 
+    snapshot_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="append", server_default="append"
+    )
+
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_data_sources_tenant_name"),
     )

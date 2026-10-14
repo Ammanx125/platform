@@ -17,6 +17,7 @@ from app.api.v1.tool_policies import router as tool_policies_router
 from app.api.v1.users import router as users_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.workflows import router as workflows_router
+from app.api.v1.browser import router as browser_router
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -37,3 +38,4 @@ api_router.include_router(tool_policies_router)
 api_router.include_router(events_router)
 api_router.include_router(agents_router)
 api_router.include_router(email_router)
+api_router.include_router(browser_router)
