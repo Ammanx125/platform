@@ -1,19 +1,16 @@
 # tests/unit/models/test_browser_constraints.py
 from __future__ import annotations
 
-import uuid
-
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from app.db.models.agent import Agent, AgentJob
 from app.db.models.browser import (
     BrowserAuthorization,
     BrowserExtractionProfile,
     BrowserExtractionRun,
 )
 from app.db.models.dataset import DataSource
-from app.db.models.agent import Agent, AgentJob
-from app.db.models.dataset import IngestionJob
 from app.db.session import SessionLocal
 
 

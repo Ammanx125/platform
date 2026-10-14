@@ -5,6 +5,7 @@ from app.api.v1.agents import router as agents_router
 from app.api.v1.analytics import router as analytics_router
 from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.browser import router as browser_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.datasets import router as datasets_router
 from app.api.v1.decisions import router as decisions_router
@@ -17,7 +18,6 @@ from app.api.v1.tool_policies import router as tool_policies_router
 from app.api.v1.users import router as users_router
 from app.api.v1.webhooks import router as webhooks_router
 from app.api.v1.workflows import router as workflows_router
-from app.api.v1.browser import router as browser_router
 
 api_router = APIRouter(prefix="/api/v1")
 

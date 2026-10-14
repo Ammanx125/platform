@@ -10,9 +10,9 @@ from app.web.routes import (
     auth,
     datasets,
     decisions,
+    email,
     overview,
     workflows,
-    email,
 )
 
 web_router = APIRouter()

@@ -161,9 +161,17 @@ class EvaluationContext:
 
         # Load staged rows. `__source_id` is injected so operations can
         # attribute values back to a source when needed.
+                # Load staged rows. `__source_id` is injected so operations can
+        # attribute values back to a source when needed.
+        from app.services.datasets.scope import active_snapshot_filter
+
+        scope_clauses = await active_snapshot_filter(
+            db, tenant_id=tenant_id, source_ids=resolved_sources,
+        )
         rows_stmt = (
             select(StagedRow)
             .where(StagedRow.source_id.in_(resolved_sources))
+            .where(*scope_clauses)
             .limit(row_limit)
         )
         staged = (await db.execute(rows_stmt)).scalars().all()

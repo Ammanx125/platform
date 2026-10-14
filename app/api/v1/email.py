@@ -9,7 +9,6 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentTenantId, require_permission
-from app.core.config import settings
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.email import (

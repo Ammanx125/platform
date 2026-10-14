@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # ---------- connect flow ----------
 
 class EmailConnectRequest(BaseModel):

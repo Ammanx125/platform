@@ -121,10 +121,18 @@ async def build_series(
         column_map.setdefault(m.source_id, {})[m.canonical_concept_key] = m.source_column
 
     # 3. Load rows.
+    # Same snapshot scoping as analytics context: only active snapshot
+    # rows for replace_active sources; append sources unchanged.
+    from app.services.datasets.scope import active_snapshot_filter
+
+    scope_clauses = await active_snapshot_filter(
+        db, tenant_id=tenant_id, source_ids=resolved_sources,
+    )
     rows = (
         await db.execute(
             select(StagedRow)
             .where(StagedRow.source_id.in_(resolved_sources))
+            .where(*scope_clauses)
             .limit(row_limit)
         )
     ).scalars().all()

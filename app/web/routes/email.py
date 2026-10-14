@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.services.email import service as email_service
-from app.services.email.service import EmailServiceError
 from app.web.deps import HtmlUser
 from app.web.templating import base_context, templates
 
