@@ -30,6 +30,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+import sqlalchemy as sa
+
 from sqlalchemy import (
     DateTime,
     ForeignKey,
@@ -45,6 +47,42 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin
+
+# Run states that count as "in flight" for the one-run-per-profile rule.
+# Defined here once so the model, the service, and any future migration
+# share the same set. Do not redeclare this list anywhere else.
+IN_FLIGHT_RUN_STATES: frozenset[str] = frozenset({
+    "scheduled",
+    "extracting",
+    "manifest_received",
+    "awaiting_upload",
+    "validating",
+    "activating",
+})
+
+# Terminal states. A run in one of these does not block scheduling.
+TERMINAL_RUN_STATES: frozenset[str] = frozenset({
+    "succeeded",
+    "active",
+    "superseded",
+    "failed",
+})
+
+# The full valid state set. Used by tests and by the state-transition
+# helpers. The state machine is:
+#
+#   scheduled -> extracting -> manifest_received -> awaiting_upload
+#             -> validating -> activating -> succeeded | active
+#   any in-flight state -> failed (via reaper, error, or explicit fail)
+#   succeeded -> active -> superseded
+#
+# 'succeeded' means the run finished and its snapshot was ingested
+# successfully. 'active' means the profile's active_ingestion_job_id
+# currently points at this run's ingestion job. In v1 these two states
+# coincide for the same run because activation happens immediately after
+# ingestion succeeds; they are kept separate so a future case (validation
+# succeeded but activation was deferred) can be represented honestly.
+ALL_RUN_STATES: frozenset[str] = IN_FLIGHT_RUN_STATES | TERMINAL_RUN_STATES
 
 # ---------- BrowserAuthorization ----------
 
@@ -157,6 +195,7 @@ class BrowserExtractionProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin, Tenant
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     report_identifier: Mapped[str] = mapped_column(String(500), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     extraction_instructions: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict
@@ -260,9 +299,10 @@ class BrowserExtractionRun(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixi
     )
     agent_job_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("agent_jobs.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("agent_jobs.id", ondelete="CASCADE"),
+        nullable=False,
         unique=True,
+        index=True,
     )
     ingestion_job_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -300,6 +340,15 @@ class BrowserExtractionRun(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixi
         UniqueConstraint(
             "tenant_id", "profile_id", "run_id",
             name="uq_browser_runs_tenant_profile_run",
+        ),
+        Index(
+            "uq_browser_runs_one_in_flight_per_profile",
+            "tenant_id", "profile_id",
+            unique=True,
+            postgresql_where=sa.text(
+                "status IN ('scheduled','extracting','manifest_received',"
+                "'awaiting_upload','validating','activating')"
+            ),
         ),
         Index(
             "ix_browser_runs_tenant_status",

@@ -210,6 +210,10 @@ class Settings(BaseSettings):
     email_sync_max_messages_per_job: int = 50
     email_oauth_state_ttl_minutes: int = 15
 
+    # Browser extraction
+    browser_run_timeout_seconds: int = 900  # 15 minutes
+    browser_max_rows_default: int = 100_000
+
 
 # BaseSettings loads required values from the environment at runtime.
 settings = Settings()  # pyright: ignore[reportCallIssue]

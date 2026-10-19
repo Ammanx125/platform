@@ -53,6 +53,11 @@ AGENT_JOB_COMPLETED = "agent.job.completed"
 BROWSER_AUTHORIZATION_CREATED = "browser.authorization.created"
 BROWSER_AUTHORIZATION_REVOKED = "browser.authorization.revoked"
 
+BROWSER_PROFILE_CREATED = "browser.profile.created"
+BROWSER_PROFILE_STATUS_CHANGED = "browser.profile.status_changed"
+BROWSER_RUN_SCHEDULED = "browser.run.scheduled"
+BROWSER_RUN_FAILED = "browser.run.failed"
+
 
 ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     ACTION_PENDING_APPROVAL,
@@ -75,4 +80,8 @@ ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     AGENT_JOB_COMPLETED,
     BROWSER_AUTHORIZATION_CREATED,
     BROWSER_AUTHORIZATION_REVOKED,
+    BROWSER_PROFILE_CREATED,
+    BROWSER_PROFILE_STATUS_CHANGED,
+    BROWSER_RUN_SCHEDULED,
+    BROWSER_RUN_FAILED,
 })
