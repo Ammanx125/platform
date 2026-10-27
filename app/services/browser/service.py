@@ -16,11 +16,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+import csv
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.browser import BrowserAuthorization, BrowserExtractionRun
-from app.db.models.dataset import DataSource
+from app.db.models.dataset import DataSource, IngestionJob
 from app.services.audit import service as audit_service
 from app.services.audit import types as audit_types
 
@@ -704,3 +706,320 @@ async def get_run(
             )
         )
     ).scalar_one_or_none()
+
+# ---------- manifest + upload (stage 5) ----------
+
+from app.schemas.browser import (
+    BrowserActivationResult,
+    BrowserExtractionManifest,
+    BrowserExtractionJobParams,
+)
+from app.services.browser.activation import (
+    ActivationError,
+    maybe_activate_snapshot,
+)
+
+
+async def handle_manifest(
+    db: AsyncSession,
+    *,
+    agent_job: AgentJob,
+    manifest: BrowserExtractionManifest,
+    agent_tenant_id: uuid.UUID,
+) -> BrowserExtractionRun:
+    """
+    Process a manifest reported by the agent for a browser_extract job.
+
+    Validates that:
+      - the job is a browser_extract job, in_progress
+      - the job belongs to the given tenant
+      - the job's params still parse as a valid BrowserExtractionJobParams
+      - the manifest's run_id matches the run scheduled for this job
+      - the run is in a state that permits accepting a manifest
+        ('scheduled' or 'extracting')
+      - the run's profile still exists and its authorization is active
+
+    On success, transitions the run to 'manifest_received' and stores
+    the manifest's claimed values (expected_sha256, expected_row_count).
+    Returns the run. The caller's API handler will respond to the agent
+    with an "awaiting_upload" directive; the agent will then POST the
+    bytes to the existing upload endpoint.
+
+    Idempotent: if the same manifest arrives twice for the same run and
+    the same sha256, the second call is a no-op. If a *different* sha256
+    arrives for the same run, that's a conflict.
+    """
+    if agent_job.job_type != "browser_extract":
+        raise BrowserServiceError(
+            f"manifest handler called for job_type={agent_job.job_type!r}"
+        )
+    if agent_job.tenant_id != agent_tenant_id:
+        raise BrowserServiceError("job does not belong to this tenant")
+
+    # Re-validate params; a stored job's params could predate a schema
+    # change, so we never trust them without re-validating.
+    try:
+        params = BrowserExtractionJobParams.model_validate(agent_job.params)
+    except Exception as exc:  # noqa: BLE001
+        raise BrowserServiceError(
+            f"job params are not a valid browser_extract payload: {exc}"
+        ) from exc
+
+    if params.run_id != manifest.run_id:
+        raise BrowserServiceError(
+            "manifest run_id does not match the scheduled run"
+        )
+
+    run = (
+        await db.execute(
+            select(BrowserExtractionRun)
+            .where(
+                BrowserExtractionRun.agent_job_id == agent_job.id,
+                BrowserExtractionRun.tenant_id == agent_tenant_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise BrowserServiceError("no run scheduled for this agent job")
+
+    # Idempotency: same manifest, same sha256 → no-op.
+    if (
+        run.status == "manifest_received"
+        and run.expected_sha256 == manifest.sha256
+        and run.expected_row_count == manifest.row_count
+    ):
+        return run
+    # Conflicting sha256 on the same run → conflict.
+    if (
+        run.status == "manifest_received"
+        and run.expected_sha256 != manifest.sha256
+    ):
+        raise BrowserServiceError(
+            "manifest replayed with a different sha256"
+        )
+
+    if run.status not in ("scheduled", "extracting"):
+        raise BrowserServiceError(
+            f"run is {run.status!r}; cannot accept a manifest"
+        )
+
+    # Re-check the profile + authorization — the agent may have run
+    # for 10 minutes and the tenant may have revoked access mid-flight.
+    profile = (
+        await db.execute(
+            select(BrowserExtractionProfile).where(
+                BrowserExtractionProfile.id == run.profile_id,
+                BrowserExtractionProfile.tenant_id == agent_tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if profile is None:
+        raise BrowserServiceError("run references missing profile")
+
+    auth = (
+        await db.execute(
+            select(BrowserAuthorization).where(
+                BrowserAuthorization.id == profile.authorization_id,
+                BrowserAuthorization.tenant_id == agent_tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if auth is None or auth.status != "active":
+        await fail_run(
+            db, tenant_id=agent_tenant_id, run_id=run.id,
+            error="authorization revoked before manifest receipt",
+        )
+        raise BrowserServiceError(
+            "authorization was revoked while extraction was in progress"
+        )
+
+    run.status = "manifest_received"
+    run.expected_sha256 = manifest.sha256
+    run.expected_row_count = manifest.row_count
+    await db.flush()
+    return run
+
+
+async def accept_upload(
+    db: AsyncSession,
+    *,
+    run: BrowserExtractionRun,
+    agent_tenant_id: uuid.UUID,
+    content: bytes,
+    content_hash: str,
+) -> IngestionJob:
+    """
+    Accept the uploaded CSV for a browser run.
+
+    Verifies:
+      - the run belongs to the tenant
+      - the run is in 'awaiting_upload' (set by the API handler after
+        handle_manifest), or 'manifest_received' if the agent uploaded
+        in one round-trip without waiting
+      - the received bytes hash to the expected sha256
+      - the CSV parses (proper CSV with header row)
+      - the header set matches the profile's expected_columns (a
+        missing column is a hard fail; extra columns are recorded in
+        the completeness report)
+      - the row count is within tolerance of the manifest's claim
+
+    On success:
+      - records a FileObservation
+      - creates a pending IngestionJob with pending_path ending in '.csv'
+      - stores bytes under build_storage_key
+      - sets run.status='validating', run.ingestion_job_id=<new job>
+      - returns the ingestion job; the caller commits
+
+    The activation step happens later, from run_job()'s success branch,
+    once the ingestion worker finishes. This function never activates.
+
+    Errors leave the run untouched so the caller can decide to fail it
+    or let the reaper time it out.
+    """
+    import hashlib
+    import json as _json
+    from io import StringIO
+
+    from app.core.config import settings
+    from app.services.ingestion import service as ingestion_service
+    from app.services.timestamps.files import observe_file
+    from app.services.storage.local import storage
+
+    if run.tenant_id != agent_tenant_id:
+        raise BrowserServiceError("run does not belong to this tenant")
+    if run.status not in ("manifest_received", "awaiting_upload"):
+        raise BrowserServiceError(
+            f"run is {run.status!r}; cannot accept an upload"
+        )
+
+    actual_hash = hashlib.sha256(content).hexdigest()
+    if actual_hash != content_hash:
+        raise BrowserServiceError(
+            f"content hash mismatch: expected {content_hash}, got {actual_hash}"
+        )
+    if run.expected_sha256 is not None and actual_hash != run.expected_sha256:
+        raise BrowserServiceError(
+            "uploaded bytes do not match the manifest's sha256"
+        )
+
+    # Parse the CSV.
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise BrowserServiceError(
+            f"uploaded CSV is not valid UTF-8: {exc}"
+        ) from exc
+    reader = csv.reader(StringIO(text))
+    try:
+        header = next(reader)
+    except StopIteration as exc:
+        raise BrowserServiceError("uploaded CSV is empty") from exc
+    header = [h.strip() for h in header]
+    if any(not h for h in header):
+        raise BrowserServiceError("uploaded CSV has empty column names")
+
+    profile = (
+        await db.execute(
+            select(BrowserExtractionProfile).where(
+                BrowserExtractionProfile.id == run.profile_id,
+                BrowserExtractionProfile.tenant_id == agent_tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if profile is None:
+        raise BrowserServiceError("run references missing profile")
+
+    expected = list(profile.expected_columns)
+    missing = [c for c in expected if c not in header]
+    if missing:
+        raise BrowserServiceError(
+            f"uploaded CSV is missing required columns: {missing}"
+        )
+    extra = [c for c in header if c not in expected]
+
+    row_count = sum(1 for _ in reader)
+
+    tolerance_pct = float((profile.limits or {}).get("row_tolerance_pct", 2.0))
+    expected_rows = run.expected_row_count
+    within_tolerance = True
+    tolerance_note: str | None = None
+    if expected_rows is not None and expected_rows > 0:
+        diff_pct = abs(row_count - expected_rows) / expected_rows * 100.0
+        within_tolerance = diff_pct <= tolerance_pct
+        if not within_tolerance:
+            tolerance_note = (
+                f"row count {row_count} differs from manifest claim "
+                f"{expected_rows} by {diff_pct:.2f}% (tolerance {tolerance_pct}%)"
+            )
+
+    completeness_report = {
+        "hash_matches": True,
+        "row_count_matches": within_tolerance,
+        "columns_present": [c for c in expected if c in header],
+        "columns_missing": missing,
+        "columns_extra": extra,
+        "row_count_within_tolerance": within_tolerance,
+        "tolerance_pct": tolerance_pct,
+        "manifest_row_count": expected_rows,
+        "parsed_row_count": row_count,
+        "notes": tolerance_note,
+    }
+
+    if not within_tolerance:
+        raise BrowserServiceError(
+            tolerance_note or "row count outside tolerance"
+        )
+
+    # Record the observation and stage the file.
+    storage_key = ingestion_service.build_storage_key(
+        tenant_id=agent_tenant_id,
+        source_id=profile.source_id,
+        extension=".csv",
+    )
+    await storage.put(key=storage_key, content=content)
+
+    pending_path = f"browser-{run.run_id}.csv"
+    await observe_file(
+        db,
+        tenant_id=agent_tenant_id,
+        source_id=profile.source_id,
+        path=pending_path,
+        content_hash=actual_hash,
+        byte_size=len(content),
+        storage_key=storage_key,
+    )
+
+    job = IngestionJob(
+        tenant_id=agent_tenant_id,
+        source_id=profile.source_id,
+        status="pending",
+        storage_key=storage_key,
+        pending_path=pending_path,
+        pending_hash=actual_hash,
+    )
+    db.add(job)
+    await db.flush()
+
+    run.status = "validating"
+    run.actual_sha256 = actual_hash
+    run.actual_row_count = row_count
+    run.ingestion_job_id = job.id
+    run.completeness_report = completeness_report
+    await db.flush()
+
+    await audit_service.emit(
+        db,
+        tenant_id=agent_tenant_id,
+        event_type=audit_types.BROWSER_RUN_UPLOAD_RECEIVED,
+        subject_type="browser_extraction_run",
+        subject_id=run.id,
+        metadata={
+            "ingestion_job_id": str(job.id),
+            "actual_sha256": actual_hash,
+            "actual_row_count": row_count,
+            "columns_extra": extra,
+        },
+        message=f"browser snapshot received for run {run.run_id}",
+    )
+    return job

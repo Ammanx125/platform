@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentAgent, CurrentTenantId, require_permission
 from app.core.config import settings
 from app.db.models.agent import AgentJob, PendingFileUpload
+from app.db.models.browser import BrowserExtractionRun
 from app.db.models.dataset import IngestionJob
 from app.db.models.user import User
 from app.db.session import get_db
@@ -29,12 +30,15 @@ from app.schemas.agent import (
     AgentSyncRequest,
     AgentSyncResponse,
 )
+from app.schemas.browser import BrowserExtractionManifest
 from app.services.agents import jobs as agent_jobs_service
 from app.services.agents import service as agents_service
 from app.services.agents.jobs import JobError
 from app.services.agents.service import AgentError
 from app.services.audit import service as audit_service
 from app.services.audit import types as audit_types
+from app.services.browser import service as browser_service
+from app.services.browser.service import BrowserServiceError
 from app.services.ingestion import service as ingestion_service
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -209,6 +213,7 @@ async def agent_poll_jobs(
 @router.post(
     "/{agent_id}/jobs/{job_id}/result",
     response_model=AgentJobResultResponse,
+    response_model_exclude_none=True,
 )
 async def agent_job_result(
     agent_id: uuid.UUID,
@@ -224,6 +229,74 @@ async def agent_job_result(
     )
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
+
+    if job.job_type == "browser_extract":
+        # Browser extraction jobs follow a different completion contract:
+        # the agent reports a manifest, not a free-form result. Validate
+        # the manifest, transition the run to manifest_received, and
+        # instruct the agent to upload.
+        if body.status != "completed":
+            # A failed or rejected browser job means the run itself failed.
+            try:
+                run = (
+                    await db.execute(
+                        select(BrowserExtractionRun).where(
+                            BrowserExtractionRun.agent_job_id == job.id,
+                            BrowserExtractionRun.tenant_id == agent.tenant_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if run is not None and run.status not in (
+                    "succeeded", "active", "superseded", "failed",
+                ):
+                    await browser_service.fail_run(
+                        db,
+                        tenant_id=agent.tenant_id,
+                        run_id=run.id,
+                        error=body.error or "agent reported failure",
+                    )
+            except BrowserServiceError:
+                pass
+            job = await agent_jobs_service.complete_job(
+                db, job=job, status=body.status,
+                result={}, error=body.error,
+            )
+            await db.commit()
+            return AgentJobResultResponse(id=job.id, status=job.status)
+
+        try:
+            manifest = BrowserExtractionManifest.model_validate(body.result)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=422,
+                detail=f"invalid browser_extract manifest: {exc}",
+            ) from exc
+
+        try:
+            run = await browser_service.handle_manifest(
+                db,
+                agent_job=job,
+                manifest=manifest,
+                agent_tenant_id=agent.tenant_id,
+            )
+        except BrowserServiceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        await agent_jobs_service.complete_job(
+            db, job=job, status="completed",
+            result={"run_id": run.run_id}, error=None,
+        )
+        await db.commit()
+
+        return AgentJobResultResponse(
+            id=job.id,
+            status=job.status,
+            run_id=run.run_id,
+            next_action="upload",
+            upload_url=(
+                f"/api/v1/agents/{agent.id}/upload/{run.expected_sha256}"
+            ),
+        )
     try:
         job = await agent_jobs_service.complete_job(
             db, job=job, status=body.status, result=body.result, error=body.error
@@ -251,6 +324,44 @@ async def agent_upload_content(
     from app.services.storage.local import storage
     if agent.id != agent_id:
         raise HTTPException(status_code=403, detail="agent mismatch")
+
+    # Browser-extraction uploads don't go through PendingFileUpload —
+    # the snapshot's pending state lives on BrowserExtractionRun.
+    # Route to the browser handler when a matching run is waiting.
+    browser_run = (
+        await db.execute(
+            select(BrowserExtractionRun)
+            .where(
+                BrowserExtractionRun.tenant_id == agent.tenant_id,
+                BrowserExtractionRun.status.in_(
+                    ("manifest_received", "awaiting_upload")
+                ),
+                BrowserExtractionRun.expected_sha256 == content_hash,
+            )
+            .order_by(BrowserExtractionRun.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    if browser_run is not None:
+        content = await file.read()
+        if len(content) > settings.browser_upload_max_bytes:
+            raise HTTPException(status_code=413, detail="snapshot too large")
+        try:
+            ingestion_job = await browser_service.accept_upload(
+                db,
+                run=browser_run,
+                agent_tenant_id=agent.tenant_id,
+                content=content,
+                content_hash=content_hash,
+            )
+        except BrowserServiceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        await db.commit()
+        return {
+            "status": "accepted",
+            "ingestion_job_id": str(ingestion_job.id),
+        }
 
     # Find the pending upload row for this hash.
     pending = (

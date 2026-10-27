@@ -57,6 +57,9 @@ BROWSER_PROFILE_CREATED = "browser.profile.created"
 BROWSER_PROFILE_STATUS_CHANGED = "browser.profile.status_changed"
 BROWSER_RUN_SCHEDULED = "browser.run.scheduled"
 BROWSER_RUN_FAILED = "browser.run.failed"
+BROWSER_RUN_ACTIVATED = "browser.run.activated"
+BROWSER_RUN_FAILED_AT_INGESTION = "browser.run.failed_at_ingestion"
+BROWSER_RUN_UPLOAD_RECEIVED = "browser.run.upload_received"
 
 
 ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
@@ -84,4 +87,7 @@ ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     BROWSER_PROFILE_STATUS_CHANGED,
     BROWSER_RUN_SCHEDULED,
     BROWSER_RUN_FAILED,
+    BROWSER_RUN_ACTIVATED,
+    BROWSER_RUN_FAILED_AT_INGESTION,
+    BROWSER_RUN_UPLOAD_RECEIVED,
 })

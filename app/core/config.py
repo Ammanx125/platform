@@ -214,6 +214,9 @@ class Settings(BaseSettings):
     browser_run_timeout_seconds: int = 900  # 15 minutes
     browser_max_rows_default: int = 100_000
 
+    # Browser extraction upload
+    browser_upload_max_bytes: int = 50 * 1024 * 1024  # 50 MB
+
 
 # BaseSettings loads required values from the environment at runtime.
 settings = Settings()  # pyright: ignore[reportCallIssue]

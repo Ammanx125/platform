@@ -99,6 +99,9 @@ class AgentJobResultRequest(BaseModel):
 class AgentJobResultResponse(BaseModel):
     id: uuid.UUID
     status: str
+    run_id: str | None = None
+    next_action: str | None = None
+    upload_url: str | None = None
 
 
 class ClassificationRead(BaseModel):

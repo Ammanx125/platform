@@ -125,6 +125,7 @@ async def _run_pdf_job(
 
     await db.flush()
 
+
 async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
     """
     Executes one ingestion job to completion. Called by the worker.
@@ -401,6 +402,10 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
             },
             message=f"ingestion completed for {source.name}",
         )
+        from app.services.browser.activation import maybe_activate_snapshot
+
+        await maybe_activate_snapshot(db, ingestion_job=job)
+
         await db.commit()
 
     except Exception as exc:  # noqa: BLE001
@@ -443,6 +448,13 @@ async def run_job(db: AsyncSession, *, job_id: uuid.UUID) -> None:
                     "error": str(exc)[:500],
                 },
                 message=f"ingestion failed: {str(exc)[:120]}",
+            )
+            from app.services.browser.activation import (
+                maybe_fail_browser_run_on_ingestion_failure,
+            )
+
+            await maybe_fail_browser_run_on_ingestion_failure(
+                db, ingestion_job=job
             )
             await db.commit()
 

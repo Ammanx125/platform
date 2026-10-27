@@ -1,6 +1,7 @@
 # tests/unit/services/email/test_oauth_state.py
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -80,12 +81,10 @@ async def test_consume_rejects_expired_state(two_tenants):
         # Force expiry.
         row = (
             await db.execute(
-                select(EmailOAuthState).where(EmailOAuthState.id
-                == (await db.execute(
-                    select(EmailOAuthState.id).where(
-                        EmailOAuthState.status == "pending"
-                    ).limit(1)
-                )).scalar_one())
+                select(EmailOAuthState).where(
+                    EmailOAuthState.state_hash
+                    == hashlib.sha256(created.nonce.encode("utf-8")).hexdigest()
+                )
             )
         ).scalar_one()
         row.expires_at = datetime.now(UTC) - timedelta(minutes=1)

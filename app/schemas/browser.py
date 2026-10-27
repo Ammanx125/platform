@@ -174,3 +174,50 @@ class BrowserAuthorizationRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+# ---------- manifest (agent → server) ----------
+
+class BrowserExtractionManifest(BaseModel):
+    """
+    The agent's report that it finished an extraction.
+
+    Echoed back by the agent after executing a browser_extract job. The
+    server validates this against the specific job, profile, and run
+    before accepting the artifact.
+
+    Integrity: run_id and sha256 are the two claims that matter. The
+    server verifies:
+      - run_id matches the run scheduled for this agent job
+      - this agent job belongs to this tenant
+      - the run's profile still exists and its authorization is active
+      - once the CSV arrives, the actual bytes hash to sha256
+
+    row_count and complete are claims, not evidence. The server parses
+    the CSV and computes its own row_count; the completeness report in
+    the run row records the discrepancy.
+    """
+    run_id: str = Field(min_length=1, max_length=128)
+    sha256: str = Field(min_length=64, max_length=64)
+    row_count: int = Field(ge=0)
+    expected_columns: list[str] = Field(min_length=1)
+    complete: bool
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("sha256")
+    @classmethod
+    def _sha256_hex(cls, v: str) -> str:
+        if not all(c in "0123456789abcdef" for c in v.lower()):
+            raise ValueError("sha256 must be lowercase hex")
+        return v.lower()
+
+
+# ---------- activation result ----------
+
+class BrowserActivationResult(BaseModel):
+    """
+    Returned by the activation helper. Describes what changed.
+    """
+    activated: bool
+    run_id: uuid.UUID
+    previous_active_run_id: uuid.UUID | None
+    ingestion_job_id: uuid.UUID

@@ -36,12 +36,17 @@ def test_production_requires_secure_cookies() -> None:
     assert settings.cookie_secure
 
 
-def test_production_requires_google_oauth_client_id() -> None:
+def test_production_requires_google_oauth_client_id(monkeypatch) -> None:
+    monkeypatch.setattr(
+        Settings,
+        "model_config",
+        {**Settings.model_config, "env_file": None},
+    )
     with pytest.raises(
         ValueError,
         match="GOOGLE_OAUTH_CLIENT_ID is required in production",
     ):
-        Settings.model_validate({
+        Settings(**{
             "environment": "production",
             "database_url": "postgresql://localhost:5432/db",
             "jwt_secret": "x" * 32,
@@ -52,12 +57,17 @@ def test_production_requires_google_oauth_client_id() -> None:
         })
 
 
-def test_production_requires_google_oauth_client_secret() -> None:
+def test_production_requires_google_oauth_client_secret(monkeypatch) -> None:
+    monkeypatch.setattr(
+        Settings,
+        "model_config",
+        {**Settings.model_config, "env_file": None},
+    )
     with pytest.raises(
         ValueError,
         match="GOOGLE_OAUTH_CLIENT_SECRET is required in production",
     ):
-        Settings.model_validate({
+        Settings(**{
             "environment": "production",
             "database_url": "postgresql://localhost:5432/db",
             "jwt_secret": "x" * 32,
