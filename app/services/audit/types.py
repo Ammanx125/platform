@@ -61,6 +61,9 @@ BROWSER_RUN_ACTIVATED = "browser.run.activated"
 BROWSER_RUN_FAILED_AT_INGESTION = "browser.run.failed_at_ingestion"
 BROWSER_RUN_UPLOAD_RECEIVED = "browser.run.upload_received"
 
+SCENARIO_SAVED = "scenario.saved"
+SCENARIO_RECALCULATED = "scenario.recalculated"
+
 
 ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     ACTION_PENDING_APPROVAL,
@@ -90,4 +93,6 @@ ALL_AUDIT_EVENT_TYPES: frozenset[str] = frozenset({
     BROWSER_RUN_ACTIVATED,
     BROWSER_RUN_FAILED_AT_INGESTION,
     BROWSER_RUN_UPLOAD_RECEIVED,
+    SCENARIO_SAVED,
+    SCENARIO_RECALCULATED,
 })

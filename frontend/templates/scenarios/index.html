@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Scenario Lab · Sansa{% endblock %}
+
+{% block main %}
+<div class="page-header">
+  <div>
+    <h1>Scenario Lab</h1>
+    <p class="muted">Supplier price sensitivity &mdash; what existing purchase spend would cost at a different price level.</p>
+  </div>
+</div>
+
+{# ---------- 1. Is any data usable? ---------- #}
+<section class="card">
+  <h2>1. Business data</h2>
+
+  {% if not capabilities %}
+    <p class="muted">No active data sources. Ingest data before running a scenario.</p>
+  {% elif not selected_source %}
+    <div class="alert alert-warning">
+      <strong>This tenant cannot run the supplier-spend scenario yet.</strong>
+      <p>{{ capabilities|length }} active source(s) were checked. Each one below says exactly what is missing.</p>
+    </div>
+  {% else %}
+    <p class="muted">Ready source:</p>
+    <p>
+      <strong>{{ selected_source.source_name }}</strong>
+      <span class="badge badge-info">{{ selected_source.source_type }}</span>
+      <span class="badge badge-neutral">{{ selected_source.snapshot_mode }}</span>
+    </p>
+    <p class="muted">
+      {{ selected_source.supplier_count }} suppliers ·
+      baseline spend {{ selected_source.total_spend|money }} ·
+      {{ selected_source.rows_considered - (selected_source.rows_skipped or 0) }} usable rows
+      {% if selected_source.rows_skipped %}({{ selected_source.rows_skipped }} skipped){% endif %}
+    </p>
+  {% endif %}
+
+  {% if capabilities and (not selected_source or capabilities|length > 1) %}
+  <details>
+    <summary class="muted">All sources ({{ capabilities|length }})</summary>
+    <table class="table">
+      <thead>
+        <tr><th>Source</th><th>Mode</th><th>Status</th><th>Detail</th></tr>
+      </thead>
+      <tbody>
+      {% for c in capabilities %}
+        <tr>
+          <td>{{ c.source_name }}</td>
+          <td>{{ c.snapshot_mode }}</td>
+          <td>
+            {% if c.supported %}
+              <span class="badge badge-success">ready</span>
+            {% else %}
+              <span class="badge badge-warning">{{ c.code }}</span>
+            {% endif %}
+          </td>
+          <td class="muted">
+            {{ c.detail }}
+            {% if c.missing_concepts %}
+              <br><em>Needs a confirmed mapping for: {{ c.missing_concepts|join(", ") }}</em>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+</section>
+
+{# ---------- 2. Assumptions ---------- #}
+{% if selected_source %}
+<section class="card">
+  <h2>2. Define the scenario</h2>
+  <form id="scenario-form"
+        hx-post="/scenarios/preview"
+        hx-target="#scenario-result"
+        hx-swap="innerHTML"
+        hx-trigger="submit">
+    <input type="hidden" name="source_id" value="{{ selected_source.source_id }}">
+    <label for="supplier_price_change_pct">Supplier price change (%)</label>
+    <div style="display:flex;gap:.75rem;align-items:center;max-width:420px">
+      <input id="pct-slider" type="range"
+             min="{{ bounds_min }}" max="{{ bounds_max }}" step="1" value="5"
+             oninput="document.getElementById('supplier_price_change_pct').value = this.value;">
+      <input id="supplier_price_change_pct"
+             name="supplier_price_change_pct"
+             type="number" value="5" step="0.1"
+             min="{{ bounds_min }}" max="{{ bounds_max }}" style="width:6rem"
+             oninput="document.getElementById('pct-slider').value = this.value;">
+      <span class="muted">%</span>
+    </div>
+    <p class="muted">Allowed range {{ bounds_min }}% to {{ bounds_max }}%. Applied uniformly to every supplier; quantities and supplier mix are held constant.</p>
+    <button type="submit" class="btn">Calculate</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>3. Review the impact</h2>
+  <div id="scenario-result">
+    <p class="muted">Change an assumption and press Calculate. Nothing is saved until you name and save the scenario.</p>
+  </div>
+</section>
+{% endif %}
+
+{# ---------- 4. Saved scenarios ---------- #}
+<section class="card">
+  <h2>Saved scenarios</h2>
+  <form method="post" action="/scenarios/stale-scan" style="margin-bottom:.75rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn">Check for stale scenarios</button>
+    <span class="muted">Flags scenarios whose source data has changed since they were calculated. Saved numbers are never overwritten.</span>
+  </form>
+
+  {% if scenarios %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Baseline spend</th><th>Projected spend</th><th>Increase</th>
+        <th>Status</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in scenarios %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td class="cell-num">{{ s.baseline_spend|money }}</td>
+        <td class="cell-num">{{ s.projected_spend|money }}</td>
+        <td class="cell-num">{{ s.increase|money }}</td>
+        <td>
+          {% if s.is_stale %}
+            <span class="badge badge-danger">stale</span>
+          {% else %}
+            <span class="badge badge-success">{{ s.status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="post" action="/scenarios/{{ s.id }}/recalculate" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn">Recalculate</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No saved scenarios yet.</p>
+  {% endif %}
+</section>
+
+{# ---------- 5. Assumptions / limitations ---------- #}
+<section class="card">
+  <h2>What these numbers assume</h2>
+  <ul class="muted">
+    {% for l in limitations %}<li>{{ l }}</li>{% endfor %}
+  </ul>
+  <p class="muted">
+    This is a deterministic sensitivity calculation over data already in Sansa.
+    It does not forecast demand, place orders, or write to the ERP.
+  </p>
+</section>
+{% endblock %}

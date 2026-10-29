@@ -23,6 +23,7 @@ from app.db.models.email import EmailAccount
 from app.db.models.event import Event
 from app.db.models.knowledge import Chunk, Document
 from app.db.models.refresh_token import RefreshToken
+from app.db.models.scenario import WhatIfScenario
 from app.db.models.role import Permission, Role, role_permissions, user_roles
 from app.db.models.semantic import (
     CanonicalConcept,
@@ -78,4 +79,5 @@ __all__ = [
     "BrowserAuthorization",
     "BrowserExtractionProfile",
     "BrowserExtractionRun",
+    "WhatIfScenario",
 ]

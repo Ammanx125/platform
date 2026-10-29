@@ -13,6 +13,7 @@ from app.api.v1.email import router as email_router
 from app.api.v1.events import router as events_router
 from app.api.v1.knowledge import router as knowledge_router
 from app.api.v1.mappings import router as mappings_router
+from app.api.v1.scenarios import router as scenarios_router
 from app.api.v1.tenants import router as tenants_router
 from app.api.v1.tool_policies import router as tool_policies_router
 from app.api.v1.users import router as users_router
@@ -39,3 +40,4 @@ api_router.include_router(events_router)
 api_router.include_router(agents_router)
 api_router.include_router(email_router)
 api_router.include_router(browser_router)
+api_router.include_router(scenarios_router)
