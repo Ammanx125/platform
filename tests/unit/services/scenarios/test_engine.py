@@ -1,9 +1,5 @@
-# tests/unit/services/scenarios/test_engine.py
-"""
-The engine is the one part of Scenario Lab that must be provably right.
-These tests use hand-calculated numbers only: no database, no async, no
-fixtures beyond the module imports.
-"""
+"""Hand-checked correctness tests for the pure profit sensitivity engine."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -13,168 +9,138 @@ import pytest
 from app.services.scenarios import engine
 
 
-def _suppliers(*pairs: tuple[str, str]) -> list[engine.SupplierSpend]:
-    return [
-        engine.SupplierSpend(supplier_key=name, baseline_spend=Decimal(amount))
-        for name, amount in pairs
-    ]
+def _baseline(revenue: str = "1000000", cogs: str = "700000") -> engine.ProfitBaseline:
+    return engine.ProfitBaseline(revenue=Decimal(revenue), cogs=Decimal(cogs), currency="USD")
 
 
-def test_reference_case_matches_hand_calculation():
-    """2,000,000 at +12% -> 2,240,000, an increase of 240,000."""
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "1200000"), ("B", "800000")),
-        price_change_pct=Decimal("12"),
+def _assumptions(
+    supplier_cost: str = "12",
+    selling_price: str = "0",
+    volume: str = "0",
+) -> engine.ProfitAssumptions:
+    return engine.ProfitAssumptions(
+        supplier_cost_change_pct=Decimal(supplier_cost),
+        selling_price_change_pct=Decimal(selling_price),
+        volume_change_pct=Decimal(volume),
     )
-    assert result.baseline_spend == Decimal("2000000.00")
-    assert result.projected_spend == Decimal("2240000.00")
-    assert result.increase == Decimal("240000.00")
-    assert result.increase_pct == Decimal("12.00")
 
 
-def test_supplier_contributions_sum_to_total_increase():
-    """One supplier's share must equal its increase / total increase."""
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "100.00"), ("B", "300.00"), ("C", "600.00")),
-        price_change_pct=Decimal("10"),
+def test_reference_case_matches_original_plan_hand_calculation():
+    result = engine.simulate_profit(
+        baseline=_baseline(),
+        assumptions=_assumptions(supplier_cost="12"),
     )
-    total = sum(s.increase for s in result.suppliers)
-    assert total == result.increase
-    # Ranking is by absolute increase, largest first.
-    assert [s.supplier_key for s in result.suppliers] == ["C", "B", "A"]
-    assert result.suppliers[0].increase == Decimal("60.00")
-    # 60 / 100 = 60% of the total increase.
-    assert result.suppliers[0].share_of_total_increase_pct == Decimal("60.00")
-    assert result.suppliers[1].share_of_total_increase_pct == Decimal("30.00")
+
+    assert result.baseline_revenue == Decimal("1000000.00")
+    assert result.baseline_cogs == Decimal("700000.00")
+    assert result.baseline_gross_profit == Decimal("300000.00")
+    assert result.baseline_gross_margin_pct == Decimal("30.00")
+    assert result.scenario_revenue == Decimal("1000000.00")
+    assert result.scenario_cogs == Decimal("784000.00")
+    assert result.scenario_gross_profit == Decimal("216000.00")
+    assert result.scenario_gross_margin_pct == Decimal("21.60")
+    assert result.gross_profit_change == Decimal("-84000.00")
+    assert result.gross_profit_change_pct == Decimal("-28.00")
+    assert result.gross_margin_change_percentage_points == Decimal("-8.40")
 
 
-def test_shares_sum_to_one_hundred_within_rounding():
-    """Per-supplier shares are rounded for display, so allow a cent of drift."""
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(
-            ("A", "100.00"), ("B", "300.10"), ("C", "600.30"), ("D", "77.77")
-        ),
-        price_change_pct=Decimal("12"),
+def test_selling_price_and_volume_affect_revenue_and_cogs_as_specified():
+    result = engine.simulate_profit(
+        baseline=_baseline(),
+        assumptions=_assumptions(supplier_cost="12", selling_price="10", volume="-10"),
     )
-    total_share = sum(s.share_of_total_increase_pct for s in result.suppliers)
-    assert abs(total_share - Decimal("100")) <= Decimal("0.05")
+
+    assert result.scenario_revenue == Decimal("990000.00")
+    assert result.scenario_cogs == Decimal("705600.00")
+    assert result.scenario_gross_profit == Decimal("284400.00")
+    assert result.scenario_gross_margin_pct == Decimal("28.73")
+
+
+def test_revenue_and_cogs_scale_proportionally_with_volume():
+    result = engine.simulate_profit(
+        baseline=_baseline(revenue="100", cogs="70"),
+        assumptions=_assumptions(supplier_cost="0", selling_price="0", volume="20"),
+    )
+
+    assert result.scenario_revenue == Decimal("120.00")
+    assert result.scenario_cogs == Decimal("84.00")
+    assert result.scenario_gross_profit == Decimal("36.00")
+    assert result.scenario_gross_margin_pct == Decimal("30.00")
 
 
 def test_deterministic_across_calls():
-    first = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "10.005"), ("B", "20.015")),
-        price_change_pct=Decimal("7.5"),
+    args = {
+        "baseline": _baseline(revenue="0.3", cogs="0.2"),
+        "assumptions": _assumptions("7.5", "-2.5", "1.25"),
+    }
+    assert engine.simulate_profit(**args) == engine.simulate_profit(**args)
+
+
+def test_zero_revenue_has_undefined_margin_and_zero_profit_delta_pct():
+    result = engine.simulate_profit(
+        baseline=_baseline(revenue="0", cogs="0"),
+        assumptions=_assumptions(),
     )
-    second = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "10.005"), ("B", "20.015")),
-        price_change_pct=Decimal("7.5"),
-    )
-    assert first == second
 
-
-def test_price_reduction_produces_negative_increase_without_ranking():
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "1000")),
-        price_change_pct=Decimal("-10"),
-    )
-    assert result.projected_spend == Decimal("900.00")
-    assert result.increase == Decimal("-100.00")
-    assert result.increase_pct == Decimal("-10.00")
-    assert result.suppliers[0].share_of_total_increase_pct is None
-
-
-def test_zero_baseline_has_undefined_percentage():
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "0")),
-        price_change_pct=Decimal("10"),
-    )
-    assert result.increase_pct is None
-    assert result.increase == Decimal("0.00")
-
-
-def test_larger_price_decrease_never_increases_spend():
-    """Property: holding the mix fixed, a more negative change is never higher."""
-    base = _suppliers(("A", "500"), ("B", "1500"))
-    previous = None
-    for step in (Decimal("40"), Decimal("10"), Decimal("0"), Decimal("-10"), Decimal("-40")):
-        current = engine.simulate_supplier_spend(
-            suppliers=base, price_change_pct=step
-        ).projected_spend
-        if previous is not None:
-            assert current <= previous
-        previous = current
-
-
-def test_higher_cost_never_increases_spend():
-    """Property: with fixed volume, raising the price cannot lower spend."""
-    base = _suppliers(("A", "800"), ("B", "200"))
-    amounts = [
-        engine.simulate_supplier_spend(
-            suppliers=base, price_change_pct=Decimal(step)
-        ).increase
-        for step in ("0", "1", "5", "20", "100")
-    ]
-    assert amounts == sorted(amounts)
+    assert result.baseline_gross_margin_pct is None
+    assert result.scenario_gross_margin_pct is None
+    assert result.gross_profit_change_pct is None
+    assert result.gross_margin_change_percentage_points is None
 
 
 @pytest.mark.parametrize(
-    "change",
-    [Decimal("-100"), Decimal("-150")],
+    ("field", "value"),
+    [
+        ("supplier_cost_change_pct", Decimal("-0.01")),
+        ("supplier_cost_change_pct", Decimal("30.01")),
+        ("selling_price_change_pct", Decimal("-10.01")),
+        ("selling_price_change_pct", Decimal("20.01")),
+        ("volume_change_pct", Decimal("-30.01")),
+        ("volume_change_pct", Decimal("30.01")),
+    ],
 )
-def test_price_level_at_or_below_zero_is_rejected(change):
+def test_assumptions_outside_policy_bounds_are_rejected(field, value):
+    assumptions = _assumptions()
+    assumptions = engine.ProfitAssumptions(**{**assumptions.__dict__, field: value})
+
     with pytest.raises(engine.ScenarioCalculationError):
-        engine.simulate_supplier_spend(suppliers=_suppliers(("A", "1")), price_change_pct=change)
+        engine.simulate_profit(baseline=_baseline(), assumptions=assumptions)
 
 
 @pytest.mark.parametrize("value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
-def test_non_finite_inputs_are_rejected(value):
+def test_non_finite_values_are_rejected(value):
     with pytest.raises(engine.ScenarioCalculationError):
-        engine.simulate_supplier_spend(
-            suppliers=_suppliers(("A", "1")), price_change_pct=value
+        engine.simulate_profit(
+            baseline=_baseline(),
+            assumptions=engine.ProfitAssumptions(value, Decimal("0"), Decimal("0")),
         )
     with pytest.raises(engine.ScenarioCalculationError):
-        engine.simulate_supplier_spend(
-            suppliers=[
-                engine.SupplierSpend(supplier_key="A", baseline_spend=value)
-            ],
-            price_change_pct=Decimal("10"),
+        engine.simulate_profit(baseline=_baseline(revenue=str(value)), assumptions=_assumptions())
+
+
+@pytest.mark.parametrize(
+    ("revenue", "cogs", "currency"),
+    [
+        (Decimal("-1"), Decimal("1"), "USD"),
+        (Decimal("1"), Decimal("-1"), "USD"),
+        (Decimal("1"), Decimal("1"), ""),
+    ],
+)
+def test_invalid_baseline_values_are_rejected(revenue, cogs, currency):
+    with pytest.raises(engine.ScenarioCalculationError):
+        engine.simulate_profit(
+            baseline=engine.ProfitBaseline(revenue, cogs, currency),
+            assumptions=_assumptions(),
         )
 
 
-def test_negative_baseline_spend_is_rejected():
-    with pytest.raises(engine.ScenarioCalculationError):
-        engine.simulate_supplier_spend(
-            suppliers=_suppliers(("A", "-5")), price_change_pct=Decimal("10")
-        )
-
-
-def test_empty_supplier_list_is_rejected():
-    with pytest.raises(engine.ScenarioCalculationError):
-        engine.simulate_supplier_spend(suppliers=[], price_change_pct=Decimal("10"))
-
-
-def test_no_binary_float_drift_on_awkward_values():
-    """0.1 + 0.2 style values must stay exact under Decimal."""
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "0.1"), ("B", "0.2")),
-        price_change_pct=Decimal("0"),
+def test_deterministic_explanation_uses_calculated_profit_change():
+    result = engine.simulate_profit(
+        baseline=_baseline(),
+        assumptions=_assumptions(supplier_cost="12"),
     )
-    assert result.baseline_spend == Decimal("0.30")
 
-
-def test_explanation_names_the_largest_driver():
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("Big Supplier", "900"), ("Small Supplier", "100")),
-        price_change_pct=Decimal("10"),
-    )
-    text = engine.explain_deterministically(result)
-    assert "Big Supplier" in text
-    assert "Small Supplier" in text
-    assert "1,000.00" in text
-
-
-def test_explanation_handles_zero_baseline():
-    result = engine.simulate_supplier_spend(
-        suppliers=_suppliers(("A", "0")), price_change_pct=Decimal("10")
-    )
-    assert "undefined" in engine.explain_deterministically(result)
+    assert "USD 84,000.00" in result.explanation
+    assert "USD 300,000.00 to USD 216,000.00" in result.explanation
+    assert "-8.40 percentage points" in result.explanation
+    assert "forecast" in " ".join(result.limitations)

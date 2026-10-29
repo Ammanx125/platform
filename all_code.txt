@@ -1,0 +1,2399 @@
+﻿=== FILE: C:\Users\LocalAdmin\Documents\platform\app\schemas\scenarios.py ===
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.scenarios import engine
+
+ScenarioType = Literal["profit_sensitivity_v1"]
+
+
+class ProfitAssumptionsRead(BaseModel):
+    supplier_cost_change_pct: Decimal
+    selling_price_change_pct: Decimal
+    volume_change_pct: Decimal
+
+
+class ProfitAssumptions(ProfitAssumptionsRead):
+    supplier_cost_change_pct: Decimal = Field(
+        ge=engine.SUPPLIER_COST_CHANGE_MIN,
+        le=engine.SUPPLIER_COST_CHANGE_MAX,
+    )
+    selling_price_change_pct: Decimal = Field(
+        ge=engine.SELLING_PRICE_CHANGE_MIN,
+        le=engine.SELLING_PRICE_CHANGE_MAX,
+    )
+    volume_change_pct: Decimal = Field(
+        ge=engine.VOLUME_CHANGE_MIN,
+        le=engine.VOLUME_CHANGE_MAX,
+    )
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator(
+        "supplier_cost_change_pct",
+        "selling_price_change_pct",
+        "volume_change_pct",
+    )
+    @classmethod
+    def _finite(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("assumptions must be finite numbers")
+        return value
+
+
+class ScenarioCalculateRequest(BaseModel):
+    scenario_type: ScenarioType = engine.SCENARIO_TYPE
+    source_id: uuid.UUID
+    assumptions: ProfitAssumptions
+
+    model_config = {"extra": "forbid"}
+
+
+class ScenarioSaveRequest(ScenarioCalculateRequest):
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("name must not be blank")
+        return cleaned
+
+
+class ScenarioCompareRequest(BaseModel):
+    scenario_ids: list[uuid.UUID] = Field(min_length=2, max_length=3)
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("scenario_ids")
+    @classmethod
+    def _unique_scenarios(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(set(value)) != len(value):
+            raise ValueError("scenario_ids must be unique")
+        return value
+
+
+class ProfitMetricsRead(BaseModel):
+    revenue: Decimal
+    cogs: Decimal
+    gross_profit: Decimal
+    gross_margin_pct: Decimal | None
+
+
+class ScenarioDeltaRead(BaseModel):
+    gross_profit: Decimal
+    gross_profit_pct: Decimal | None
+    gross_margin_percentage_points: Decimal | None
+
+
+class ScenarioResultRead(BaseModel):
+    scenario_type: str
+    formula_version: int
+    currency: str
+    assumptions: ProfitAssumptionsRead
+    baseline: ProfitMetricsRead
+    scenario: ProfitMetricsRead
+    delta: ScenarioDeltaRead
+    explanation: str
+    limitations: list[str]
+
+
+class ScenarioProvenanceRead(BaseModel):
+    source_id: uuid.UUID
+    source_name: str
+    snapshot_mode: str
+    ingestion_job_ids: list[uuid.UUID]
+    revenue_concept: str
+    revenue_column: str
+    cogs_concept: str
+    cogs_column: str
+    currency_concept: str
+    currency_column: str
+    currency: str
+    rows_considered: int
+    rows_skipped: int
+    skipped_examples: list[str]
+    latest_ingested_at: datetime | None
+
+
+class ScenarioPreviewResponse(BaseModel):
+    status: Literal["calculated"] = "calculated"
+    result: ScenarioResultRead
+    provenance: ScenarioProvenanceRead
+    calculated_at: datetime
+
+
+class ScenarioRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    scenario_type: str
+    source_id: uuid.UUID
+    status: str
+    assumptions: dict[str, Any]
+    result: ScenarioResultRead | None
+    provenance: ScenarioProvenanceRead | None
+    is_stale: bool
+    stale_reason: str | None
+    created_by_user_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    supported: bool
+    compatibility_note: str | None
+
+
+class ScenarioSummaryRead(BaseModel):
+    id: uuid.UUID
+    name: str
+    scenario_type: str
+    source_id: uuid.UUID
+    status: str
+    currency: str | None
+    baseline_gross_profit: Decimal | None
+    scenario_gross_profit: Decimal | None
+    gross_profit_change: Decimal | None
+    is_stale: bool
+    created_at: datetime
+    supported: bool
+
+
+class ScenarioCompareResponse(BaseModel):
+    source_id: uuid.UUID
+    currency: str
+    scenarios: list[ScenarioRead] = Field(min_length=2, max_length=3)
+
+
+class SourceCapabilityRead(BaseModel):
+    source_id: uuid.UUID
+    source_name: str
+    source_type: str
+    snapshot_mode: str
+    supported: bool
+    code: str
+    detail: str
+    missing_concepts: list[str] = Field(default_factory=list)
+    currency: str | None = None
+    revenue: Decimal | None = None
+    cogs: Decimal | None = None
+    rows_considered: int | None = None
+    rows_skipped: int | None = None
+
+
+class ScenarioCapabilitiesRead(BaseModel):
+    scenario_type: str
+    formula_version: int
+    assumption_bounds: dict[str, dict[str, Decimal]]
+    supported: bool
+    sources: list[SourceCapabilityRead]
+    limitations: list[str]
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\api\v1\scenarios.py ===
+# app/api/v1/scenarios.py
+"""
+Scenario Lab API.
+
+Contract notes:
+  - The tenant always comes from the authenticated user, never from the
+    request body. ``source_id`` is verified against the tenant inside the
+    baseline resolver.
+  - Preview (`POST /preview`) is the cheap, read-only operation; save
+    (`POST ""`) persists. Both run the same engine on the same baseline,
+    so a preview and a saved scenario with equal inputs agree.
+  - Missing prerequisites return 422 with a structured body naming the
+    missing concept(s): the UI should explain, not just fail.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import CurrentTenantId, require_permission
+from app.db.models.user import User
+from app.db.session import get_db
+from app.schemas.scenarios import (
+    ScenarioCalculateRequest,
+    ScenarioCapabilitiesRead,
+    ScenarioCompareRequest,
+    ScenarioCompareResponse,
+    ScenarioPreviewResponse,
+    ScenarioRead,
+    ScenarioSaveRequest,
+    ScenarioSummaryRead,
+    SourceCapabilityRead,
+)
+from app.services.scenarios import engine
+from app.services.scenarios import service as scenario_service
+from app.services.scenarios.baseline import BaselineUnavailable
+
+router = APIRouter(prefix="/scenarios", tags=["scenarios"])
+
+
+def _baseline_error(exc: BaselineUnavailable) -> HTTPException:
+    status_code = (
+        status.HTTP_404_NOT_FOUND
+        if exc.code == "source_not_found"
+        else status.HTTP_422_UNPROCESSABLE_ENTITY
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "code": exc.code,
+            "message": exc.detail,
+            "missing_concepts": exc.missing,
+        },
+    )
+
+
+@router.get("/capabilities", response_model=ScenarioCapabilitiesRead)
+async def scenario_capabilities(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+) -> ScenarioCapabilitiesRead:
+    """
+    Which sources can support profit sensitivity, and why others cannot.
+    Computed from confirmed revenue, COGS, and currency mappings.
+    """
+    sources: list[SourceCapabilityRead] = await scenario_service.capabilities(
+        db, tenant_id=tenant_id
+    )
+    return ScenarioCapabilitiesRead(
+        scenario_type=engine.SCENARIO_TYPE,
+        formula_version=engine.FORMULA_VERSION,
+        assumption_bounds={
+            "supplier_cost_change_pct": {
+                "min": engine.SUPPLIER_COST_CHANGE_MIN,
+                "max": engine.SUPPLIER_COST_CHANGE_MAX,
+            },
+            "selling_price_change_pct": {
+                "min": engine.SELLING_PRICE_CHANGE_MIN,
+                "max": engine.SELLING_PRICE_CHANGE_MAX,
+            },
+            "volume_change_pct": {
+                "min": engine.VOLUME_CHANGE_MIN,
+                "max": engine.VOLUME_CHANGE_MAX,
+            },
+        },
+        supported=any(s.supported for s in sources),
+        sources=sources,
+        limitations=engine.default_limitations(),
+    )
+
+
+@router.post("/preview", response_model=ScenarioPreviewResponse)
+async def preview_scenario(
+    body: ScenarioCalculateRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+) -> ScenarioPreviewResponse:
+    """Calculate without saving. Read-only and side-effect free."""
+    try:
+        result_document, baseline, _result = await scenario_service.calculate(
+            db,
+            tenant_id=tenant_id,
+            source_id=body.source_id,
+            assumptions=engine.ProfitAssumptions(
+                supplier_cost_change_pct=body.assumptions.supplier_cost_change_pct,
+                selling_price_change_pct=body.assumptions.selling_price_change_pct,
+                volume_change_pct=body.assumptions.volume_change_pct,
+            ),
+        )
+    except BaselineUnavailable as exc:
+        raise _baseline_error(exc) from exc
+    except scenario_service.ScenarioServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return ScenarioPreviewResponse(
+        result=scenario_service.result_read(result_document),
+        provenance=scenario_service.provenance_read(
+            {
+                **baseline.to_snapshot(),
+                "calculated_at": datetime.now(UTC).isoformat(),
+            }
+        ),
+        calculated_at=datetime.now(UTC),
+    )
+
+
+@router.post(
+    "",
+    response_model=ScenarioRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def save_scenario(
+    body: ScenarioSaveRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    user: Annotated[User, Depends(require_permission("dataset:write"))],
+) -> ScenarioRead:
+    """Calculate and persist a named scenario with its frozen baseline."""
+    try:
+        scenario = await scenario_service.save(
+            db,
+            tenant_id=tenant_id,
+            user_id=user.id,
+            name=body.name,
+            source_id=body.source_id,
+            assumptions=engine.ProfitAssumptions(
+                supplier_cost_change_pct=body.assumptions.supplier_cost_change_pct,
+                selling_price_change_pct=body.assumptions.selling_price_change_pct,
+                volume_change_pct=body.assumptions.volume_change_pct,
+            ),
+        )
+    except BaselineUnavailable as exc:
+        raise _baseline_error(exc) from exc
+    except scenario_service.ScenarioServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(scenario)
+    return scenario_service.to_read(scenario)
+
+
+@router.get("", response_model=list[ScenarioSummaryRead])
+async def list_scenarios(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+    limit: int = 100,
+) -> list[ScenarioSummaryRead]:
+    if not 1 <= limit <= 200:
+        raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
+    rows = await scenario_service.list_scenarios(db, tenant_id=tenant_id, limit=limit)
+    return [scenario_service.to_summary(r) for r in rows]
+
+
+@router.post("/compare", response_model=ScenarioCompareResponse)
+async def compare_scenarios(
+    body: ScenarioCompareRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+) -> ScenarioCompareResponse:
+    """Compare two or three saved scenarios for the same source/currency."""
+    try:
+        return await scenario_service.compare_scenarios(
+            db, tenant_id=tenant_id, scenario_ids=body.scenario_ids
+        )
+    except scenario_service.ScenarioNotFound as exc:
+        raise HTTPException(status_code=404, detail="scenario not found") from exc
+    except scenario_service.ScenarioServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/{scenario_id}", response_model=ScenarioRead)
+async def get_scenario(
+    scenario_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+) -> ScenarioRead:
+    try:
+        scenario = await scenario_service.get(db, tenant_id=tenant_id, scenario_id=scenario_id)
+    except scenario_service.ScenarioNotFound as exc:
+        # 404 for another tenant's scenario too: never confirm it exists.
+        raise HTTPException(status_code=404, detail="scenario not found") from exc
+    return scenario_service.to_read(scenario)
+
+
+@router.post("/{scenario_id}/recalculate", response_model=ScenarioRead)
+async def recalculate_scenario(
+    scenario_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    user: Annotated[User, Depends(require_permission("dataset:write"))],
+) -> ScenarioRead:
+    """
+    Re-run against the current baseline using the saved assumptions.
+    If the source can no longer support the scenario, the run is marked
+    stale and the previous numbers are left intact.
+    """
+    try:
+        scenario = await scenario_service.recalculate(
+            db, tenant_id=tenant_id, scenario_id=scenario_id, user_id=user.id
+        )
+    except scenario_service.ScenarioNotFound as exc:
+        raise HTTPException(status_code=404, detail="scenario not found") from exc
+    except BaselineUnavailable as exc:
+        await db.commit()
+        raise _baseline_error(exc) from exc
+    except scenario_service.ScenarioServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await db.commit()
+    await db.refresh(scenario)
+    return scenario_service.to_read(scenario)
+
+
+@router.post("/stale-scan", response_model=dict)
+async def scan_stale_scenarios(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:write"))],
+) -> dict[str, int]:
+    """
+    Flag saved scenarios whose source data has moved on since they were
+    calculated. Safe to call repeatedly.
+    """
+    updated = await scenario_service.mark_stale_scenarios(db, tenant_id=tenant_id)
+    await db.commit()
+    return {"marked_stale": updated}
+
+
+__all__ = ["router"]
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\services\scenarios\engine.py ===
+"""
+Deterministic procurement and gross-profit sensitivity calculations.
+
+Pure functions only: no database, filesystem, network, or LLM access.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Decimal, localcontext
+
+SCENARIO_TYPE = "profit_sensitivity_v1"
+FORMULA_VERSION = 1
+
+SUPPLIER_COST_CHANGE_MIN = Decimal("0")
+SUPPLIER_COST_CHANGE_MAX = Decimal("30")
+SELLING_PRICE_CHANGE_MIN = Decimal("-10")
+SELLING_PRICE_CHANGE_MAX = Decimal("20")
+VOLUME_CHANGE_MIN = Decimal("-30")
+VOLUME_CHANGE_MAX = Decimal("30")
+
+_MONEY_QUANT = Decimal("0.01")
+_PCT_QUANT = Decimal("0.01")
+
+
+class ScenarioCalculationError(Exception):
+    """Inputs are individually well-formed but the calculation is undefined."""
+
+
+@dataclass(frozen=True)
+class ProfitBaseline:
+    revenue: Decimal
+    cogs: Decimal
+    currency: str
+
+
+@dataclass(frozen=True)
+class ProfitAssumptions:
+    supplier_cost_change_pct: Decimal
+    selling_price_change_pct: Decimal
+    volume_change_pct: Decimal
+
+
+@dataclass
+class ProfitSensitivityResult:
+    scenario_type: str
+    formula_version: int
+    currency: str
+    assumptions: ProfitAssumptions
+    baseline_revenue: Decimal
+    baseline_cogs: Decimal
+    baseline_gross_profit: Decimal
+    baseline_gross_margin_pct: Decimal | None
+    scenario_revenue: Decimal
+    scenario_cogs: Decimal
+    scenario_gross_profit: Decimal
+    scenario_gross_margin_pct: Decimal | None
+    gross_profit_change: Decimal
+    gross_profit_change_pct: Decimal | None
+    gross_margin_change_percentage_points: Decimal | None
+    explanation: str
+    limitations: list[str] = field(default_factory=list)
+
+
+def _rounded(value: Decimal, quant: Decimal) -> Decimal:
+    return value.quantize(quant, rounding=ROUND_HALF_UP)
+
+
+def _require_finite(value: Decimal, field_name: str) -> None:
+    if not value.is_finite():
+        raise ScenarioCalculationError(f"{field_name} must be a finite number")
+
+
+def _validate_assumption(value: Decimal, *, name: str, minimum: Decimal, maximum: Decimal) -> None:
+    _require_finite(value, name)
+    if not minimum <= value <= maximum:
+        raise ScenarioCalculationError(f"{name} must be between {minimum} and {maximum} percent")
+
+
+def simulate_profit(
+    *,
+    baseline: ProfitBaseline,
+    assumptions: ProfitAssumptions,
+) -> ProfitSensitivityResult:
+    """
+    Calculate the gross-profit impact while holding the purchasing mix fixed.
+
+    Both revenue and COGS scale with volume. Selling price affects revenue;
+    supplier cost affects COGS. This is sensitivity analysis, not a forecast.
+    """
+    _require_finite(baseline.revenue, "baseline.revenue")
+    _require_finite(baseline.cogs, "baseline.cogs")
+    if baseline.revenue < 0:
+        raise ScenarioCalculationError("baseline revenue must be non-negative")
+    if baseline.cogs < 0:
+        raise ScenarioCalculationError("baseline COGS must be non-negative")
+    if not baseline.currency or baseline.currency != baseline.currency.strip():
+        raise ScenarioCalculationError("baseline currency must be a normalized code")
+
+    _validate_assumption(
+        assumptions.supplier_cost_change_pct,
+        name="supplier_cost_change_pct",
+        minimum=SUPPLIER_COST_CHANGE_MIN,
+        maximum=SUPPLIER_COST_CHANGE_MAX,
+    )
+    _validate_assumption(
+        assumptions.selling_price_change_pct,
+        name="selling_price_change_pct",
+        minimum=SELLING_PRICE_CHANGE_MIN,
+        maximum=SELLING_PRICE_CHANGE_MAX,
+    )
+    _validate_assumption(
+        assumptions.volume_change_pct,
+        name="volume_change_pct",
+        minimum=VOLUME_CHANGE_MIN,
+        maximum=VOLUME_CHANGE_MAX,
+    )
+
+    with localcontext() as context:
+        context.prec = 40
+        volume_factor = Decimal(1) + assumptions.volume_change_pct / Decimal(100)
+        revenue_factor = Decimal(1) + assumptions.selling_price_change_pct / Decimal(100)
+        cogs_factor = Decimal(1) + assumptions.supplier_cost_change_pct / Decimal(100)
+
+        baseline_revenue = _rounded(baseline.revenue, _MONEY_QUANT)
+        baseline_cogs = _rounded(baseline.cogs, _MONEY_QUANT)
+        baseline_profit = _rounded(baseline_revenue - baseline_cogs, _MONEY_QUANT)
+        scenario_revenue = _rounded(baseline.revenue * revenue_factor * volume_factor, _MONEY_QUANT)
+        scenario_cogs = _rounded(baseline.cogs * cogs_factor * volume_factor, _MONEY_QUANT)
+        scenario_profit = _rounded(scenario_revenue - scenario_cogs, _MONEY_QUANT)
+        profit_change = _rounded(scenario_profit - baseline_profit, _MONEY_QUANT)
+
+        baseline_margin = (
+            _rounded(baseline_profit / baseline_revenue * Decimal(100), _PCT_QUANT)
+            if baseline_revenue > 0
+            else None
+        )
+        scenario_margin = (
+            _rounded(scenario_profit / scenario_revenue * Decimal(100), _PCT_QUANT)
+            if scenario_revenue > 0
+            else None
+        )
+        profit_change_pct = (
+            _rounded(profit_change / abs(baseline_profit) * Decimal(100), _PCT_QUANT)
+            if baseline_profit != 0
+            else None
+        )
+        margin_change = (
+            _rounded(scenario_margin - baseline_margin, _PCT_QUANT)
+            if scenario_margin is not None and baseline_margin is not None
+            else None
+        )
+
+    result = ProfitSensitivityResult(
+        scenario_type=SCENARIO_TYPE,
+        formula_version=FORMULA_VERSION,
+        currency=baseline.currency,
+        assumptions=assumptions,
+        baseline_revenue=baseline_revenue,
+        baseline_cogs=baseline_cogs,
+        baseline_gross_profit=baseline_profit,
+        baseline_gross_margin_pct=baseline_margin,
+        scenario_revenue=scenario_revenue,
+        scenario_cogs=scenario_cogs,
+        scenario_gross_profit=scenario_profit,
+        scenario_gross_margin_pct=scenario_margin,
+        gross_profit_change=profit_change,
+        gross_profit_change_pct=profit_change_pct,
+        gross_margin_change_percentage_points=margin_change,
+        explanation="",
+        limitations=default_limitations(),
+    )
+    result.explanation = explain_deterministically(result)
+    return result
+
+
+def default_limitations() -> list[str]:
+    return [
+        "Sales volume changes proportionally scale both revenue and COGS.",
+        "Selling-price changes affect revenue only; supplier-cost changes affect COGS only.",
+        "The purchasing mix and unit volumes are otherwise held constant.",
+        "This is deterministic sensitivity analysis, not a demand or profit forecast.",
+        "Demand elasticity, taxes, discounts, fixed costs, inventory constraints, and currency conversion are not modeled.",
+    ]
+
+
+def explain_deterministically(result: ProfitSensitivityResult) -> str:
+    """Render a concise explanation from calculated values without an LLM."""
+    change_label = "increase" if result.gross_profit_change >= 0 else "decrease"
+    text = (
+        f"Under the supplied assumptions, gross profit would {change_label} by "
+        f"{result.currency} {abs(result.gross_profit_change):,.2f}, from "
+        f"{result.currency} {result.baseline_gross_profit:,.2f} to "
+        f"{result.currency} {result.scenario_gross_profit:,.2f}."
+    )
+    if result.baseline_gross_profit == 0:
+        text += " A percentage change is undefined because baseline gross profit is zero."
+    elif result.gross_profit_change_pct is not None:
+        text += f" That is a {result.gross_profit_change_pct:+}% change in gross profit."
+    if result.gross_margin_change_percentage_points is not None:
+        text += (
+            f" Gross margin moves from {result.baseline_gross_margin_pct}% to "
+            f"{result.scenario_gross_margin_pct}% "
+            f"({result.gross_margin_change_percentage_points:+} percentage points)."
+        )
+    else:
+        text += " Gross margin is undefined because scenario revenue is zero."
+    return text
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\services\scenarios\baseline.py ===
+"""
+Resolve a tenant-owned, auditable revenue/COGS baseline for profit analysis.
+
+V1 deliberately requires one source with confirmed Revenue, Cost of Goods
+Sold, and Currency mappings. It will not combine unrelated periods, sources,
+or generic operating costs and pretend they form gross profit.
+"""
+
+from __future__ import annotations
+
+import re
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.browser import BrowserExtractionProfile
+from app.db.models.dataset import DataSource, IngestionJob, StagedRow
+from app.db.models.semantic import SemanticMapping
+
+REVENUE_CONCEPT = "Finance.Revenue"
+COGS_CONCEPT = "Finance.CostOfGoodsSold"
+CURRENCY_CONCEPT = "Finance.Currency"
+SUPPORTED_SNAPSHOT_MODES = frozenset({"append", "replace_active"})
+_MAX_ROWS = 200_000
+_CURRENCY_PATTERN = re.compile(r"^[A-Z]{3}$")
+
+
+class BaselineUnavailable(Exception):
+    """The source cannot support a reliable, explainable profit scenario."""
+
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        missing: list[str] | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+        self.missing = missing or []
+
+
+@dataclass(frozen=True)
+class ProfitBaseline:
+    source_id: uuid.UUID
+    source_name: str
+    snapshot_mode: str
+    ingestion_job_ids: list[uuid.UUID]
+    revenue_concept: str
+    revenue_column: str
+    cogs_concept: str
+    cogs_column: str
+    currency_concept: str
+    currency_column: str
+    currency: str
+    revenue: Decimal
+    cogs: Decimal
+    rows_considered: int
+    latest_ingested_at: datetime | None
+
+    @property
+    def gross_profit(self) -> Decimal:
+        return self.revenue - self.cogs
+
+    @property
+    def gross_margin_pct(self) -> Decimal | None:
+        if self.revenue == 0:
+            return None
+        return self.gross_profit / self.revenue * Decimal(100)
+
+    def to_snapshot(self) -> dict[str, Any]:
+        return {
+            "source_id": str(self.source_id),
+            "source_name": self.source_name,
+            "snapshot_mode": self.snapshot_mode,
+            "ingestion_job_ids": [str(job_id) for job_id in self.ingestion_job_ids],
+            "revenue_concept": self.revenue_concept,
+            "revenue_column": self.revenue_column,
+            "cogs_concept": self.cogs_concept,
+            "cogs_column": self.cogs_column,
+            "currency_concept": self.currency_concept,
+            "currency_column": self.currency_column,
+            "currency": self.currency,
+            "revenue": str(self.revenue),
+            "cogs": str(self.cogs),
+            "gross_profit": str(self.gross_profit),
+            "gross_margin_pct": (
+                str(self.gross_margin_pct) if self.gross_margin_pct is not None else None
+            ),
+            "rows_considered": self.rows_considered,
+            "rows_skipped": 0,
+            "skipped_examples": [],
+            "latest_ingested_at": (
+                self.latest_ingested_at.isoformat() if self.latest_ingested_at is not None else None
+            ),
+        }
+
+
+async def list_candidate_sources(db: AsyncSession, *, tenant_id: uuid.UUID) -> list[DataSource]:
+    statement = (
+        select(DataSource)
+        .where(
+            DataSource.tenant_id == tenant_id,
+            DataSource.is_active.is_(True),
+        )
+        .order_by(DataSource.created_at.desc())
+    )
+    return list((await db.execute(statement)).scalars().all())
+
+
+async def _mapping(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    source_id: uuid.UUID,
+    concept: str,
+    confirmed_only: bool,
+) -> SemanticMapping | None:
+    statement = select(SemanticMapping).where(
+        SemanticMapping.tenant_id == tenant_id,
+        SemanticMapping.source_id == source_id,
+        SemanticMapping.canonical_concept_key == concept,
+    )
+    if confirmed_only:
+        statement = statement.where(SemanticMapping.status == "confirmed")
+    return (
+        await db.execute(statement.order_by(SemanticMapping.created_at.asc()).limit(1))
+    ).scalar_one_or_none()
+
+
+async def _active_job_id(
+    db: AsyncSession, *, tenant_id: uuid.UUID, source: DataSource
+) -> uuid.UUID | None:
+    if source.snapshot_mode != "replace_active":
+        return None
+    return (
+        await db.execute(
+            select(BrowserExtractionProfile.active_ingestion_job_id).where(
+                BrowserExtractionProfile.tenant_id == tenant_id,
+                BrowserExtractionProfile.source_id == source.id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def _parse_number(raw: Any, *, field_name: str, row_number: int) -> Decimal:
+    if raw is None or isinstance(raw, bool):
+        raise BaselineUnavailable(
+            "incomplete_data",
+            f"row {row_number} has no usable {field_name} value; "
+            "the calculation was blocked rather than silently omitting data",
+        )
+    try:
+        value = Decimal(str(raw).strip().replace(",", ""))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise BaselineUnavailable(
+            "invalid_data",
+            f"row {row_number} has an invalid {field_name} value",
+        ) from exc
+    if not value.is_finite():
+        raise BaselineUnavailable(
+            "invalid_data", f"row {row_number} has a non-finite {field_name} value"
+        )
+    if value < 0:
+        raise BaselineUnavailable(
+            "negative_financial_value",
+            f"row {row_number} has negative {field_name}; "
+            "refund and credit treatment must be defined before inclusion",
+        )
+    return value
+
+
+async def resolve_profit_baseline(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    source_id: uuid.UUID,
+) -> ProfitBaseline:
+    source = (
+        await db.execute(
+            select(DataSource).where(
+                DataSource.id == source_id,
+                DataSource.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if source is None:
+        raise BaselineUnavailable("source_not_found", "source not found for this tenant")
+    if not source.is_active:
+        raise BaselineUnavailable("source_inactive", "the source is inactive")
+    if source.snapshot_mode not in SUPPORTED_SNAPSHOT_MODES:
+        raise BaselineUnavailable(
+            "unsupported_snapshot_mode",
+            f"snapshot mode {source.snapshot_mode!r} is not supported",
+        )
+
+    required = (REVENUE_CONCEPT, COGS_CONCEPT, CURRENCY_CONCEPT)
+    mappings: dict[str, SemanticMapping] = {}
+    missing: list[str] = []
+    unconfirmed: list[str] = []
+    for concept in required:
+        confirmed = await _mapping(
+            db,
+            tenant_id=tenant_id,
+            source_id=source.id,
+            concept=concept,
+            confirmed_only=True,
+        )
+        if confirmed is not None:
+            mappings[concept] = confirmed
+            continue
+        any_mapping = await _mapping(
+            db,
+            tenant_id=tenant_id,
+            source_id=source.id,
+            concept=concept,
+            confirmed_only=False,
+        )
+        (unconfirmed if any_mapping is not None else missing).append(concept)
+    if missing or unconfirmed:
+        unmet = sorted(set(missing + unconfirmed))
+        raise BaselineUnavailable(
+            "missing_mappings",
+            "a reliable profit baseline requires confirmed mappings for: " + ", ".join(unmet),
+            missing=unmet,
+        )
+
+    active_job_id = await _active_job_id(db, tenant_id=tenant_id, source=source)
+    if source.snapshot_mode == "replace_active" and active_job_id is None:
+        raise BaselineUnavailable(
+            "no_active_snapshot",
+            "the replace_active source has no active ingestion snapshot",
+        )
+
+    statement = (
+        select(StagedRow.raw_data, StagedRow.row_number, StagedRow.job_id)
+        .join(IngestionJob, IngestionJob.id == StagedRow.job_id)
+        .where(
+            StagedRow.tenant_id == tenant_id,
+            StagedRow.source_id == source.id,
+            IngestionJob.status == "succeeded",
+        )
+    )
+    if active_job_id is not None:
+        statement = statement.where(StagedRow.job_id == active_job_id)
+    statement = statement.order_by(StagedRow.job_id, StagedRow.row_number).limit(_MAX_ROWS + 1)
+    staged = (await db.execute(statement)).all()
+    if len(staged) > _MAX_ROWS:
+        raise BaselineUnavailable(
+            "too_many_rows",
+            f"the source exceeds the {_MAX_ROWS:,}-row v1 calculation limit",
+        )
+    if not staged:
+        raise BaselineUnavailable("no_staged_rows", "the source has no successful staged rows")
+
+    revenue_column = mappings[REVENUE_CONCEPT].source_column
+    cogs_column = mappings[COGS_CONCEPT].source_column
+    currency_column = mappings[CURRENCY_CONCEPT].source_column
+    total_revenue = Decimal(0)
+    total_cogs = Decimal(0)
+    currencies: set[str] = set()
+    job_ids: set[uuid.UUID] = set()
+    for raw_data, row_number, job_id in staged:
+        data = raw_data if isinstance(raw_data, dict) else {}
+        row_label = int(row_number)
+        revenue = _parse_number(
+            data.get(revenue_column),
+            field_name="revenue",
+            row_number=row_label,
+        )
+        cogs = _parse_number(
+            data.get(cogs_column),
+            field_name="COGS",
+            row_number=row_label,
+        )
+        raw_currency = data.get(currency_column)
+        currency = str(raw_currency or "").strip().upper()
+        if not _CURRENCY_PATTERN.fullmatch(currency):
+            raise BaselineUnavailable(
+                "unknown_currency",
+                f"row {row_label} has no normalized three-letter currency code; "
+                "currency must be confirmed before combining financial values",
+                missing=[CURRENCY_CONCEPT],
+            )
+        currencies.add(currency)
+        if len(currencies) > 1:
+            raise BaselineUnavailable(
+                "mixed_currencies",
+                "the source contains multiple currencies; currency conversion "
+                "is not modeled, so the values cannot be combined",
+            )
+        total_revenue += revenue
+        total_cogs += cogs
+        job_ids.add(job_id)
+
+    latest_ingested_at = (
+        await db.execute(
+            select(func.max(IngestionJob.finished_at)).where(IngestionJob.id.in_(job_ids))
+        )
+    ).scalar_one_or_none()
+    return ProfitBaseline(
+        source_id=source.id,
+        source_name=source.name,
+        snapshot_mode=source.snapshot_mode,
+        ingestion_job_ids=sorted(job_ids, key=str),
+        revenue_concept=REVENUE_CONCEPT,
+        revenue_column=revenue_column,
+        cogs_concept=COGS_CONCEPT,
+        cogs_column=cogs_column,
+        currency_concept=CURRENCY_CONCEPT,
+        currency_column=currency_column,
+        currency=next(iter(currencies)),
+        revenue=total_revenue,
+        cogs=total_cogs,
+        rows_considered=len(staged),
+        latest_ingested_at=latest_ingested_at,
+    )
+
+
+def is_baseline_current(
+    *, saved_snapshot: dict[str, Any], current_snapshot: dict[str, Any]
+) -> bool:
+    return saved_snapshot == current_snapshot
+
+
+__all__ = [
+    "BaselineUnavailable",
+    "ProfitBaseline",
+    "REVENUE_CONCEPT",
+    "COGS_CONCEPT",
+    "CURRENCY_CONCEPT",
+    "is_baseline_current",
+    "list_candidate_sources",
+    "resolve_profit_baseline",
+]
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\services\scenarios\service.py ===
+"""
+Scenario Lab orchestration and persistence.
+
+The service owns tenant-scoped data resolution, durable snapshots,
+staleness, and API serialization. Numerical calculations stay in engine.py.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.scenario import WhatIfScenario
+from app.schemas.scenarios import (
+    ProfitMetricsRead,
+    ScenarioCompareResponse,
+    ScenarioDeltaRead,
+    ScenarioProvenanceRead,
+    ScenarioRead,
+    ScenarioResultRead,
+    ScenarioSummaryRead,
+    SourceCapabilityRead,
+)
+from app.services.audit import service as audit_service
+from app.services.audit import types as audit_types
+from app.services.scenarios import engine
+from app.services.scenarios.baseline import (
+    BaselineUnavailable,
+    ProfitBaseline,
+    is_baseline_current,
+    list_candidate_sources,
+    resolve_profit_baseline,
+)
+
+PERMISSION_READ = "dataset:read"
+PERMISSION_WRITE = "dataset:write"
+
+
+class ScenarioServiceError(Exception):
+    """A scenario operation failed in a way the caller must report."""
+
+
+class ScenarioNotFound(ScenarioServiceError):
+    pass
+
+
+def _result_document(
+    result: engine.ProfitSensitivityResult,
+) -> dict[str, Any]:
+    """JSONB-safe result shape, with Decimal values stored as strings."""
+    return {
+        "scenario_type": result.scenario_type,
+        "formula_version": result.formula_version,
+        "currency": result.currency,
+        "assumptions": {
+            "supplier_cost_change_pct": str(result.assumptions.supplier_cost_change_pct),
+            "selling_price_change_pct": str(result.assumptions.selling_price_change_pct),
+            "volume_change_pct": str(result.assumptions.volume_change_pct),
+        },
+        "baseline": {
+            "revenue": str(result.baseline_revenue),
+            "cogs": str(result.baseline_cogs),
+            "gross_profit": str(result.baseline_gross_profit),
+            "gross_margin_pct": (
+                str(result.baseline_gross_margin_pct)
+                if result.baseline_gross_margin_pct is not None
+                else None
+            ),
+        },
+        "scenario": {
+            "revenue": str(result.scenario_revenue),
+            "cogs": str(result.scenario_cogs),
+            "gross_profit": str(result.scenario_gross_profit),
+            "gross_margin_pct": (
+                str(result.scenario_gross_margin_pct)
+                if result.scenario_gross_margin_pct is not None
+                else None
+            ),
+        },
+        "delta": {
+            "gross_profit": str(result.gross_profit_change),
+            "gross_profit_pct": (
+                str(result.gross_profit_change_pct)
+                if result.gross_profit_change_pct is not None
+                else None
+            ),
+            "gross_margin_percentage_points": (
+                str(result.gross_margin_change_percentage_points)
+                if result.gross_margin_change_percentage_points is not None
+                else None
+            ),
+        },
+        "explanation": result.explanation,
+        "limitations": list(result.limitations),
+    }
+
+
+def _provenance_document(baseline: ProfitBaseline) -> dict[str, Any]:
+    snapshot = baseline.to_snapshot()
+    snapshot["calculated_at"] = datetime.now(UTC).isoformat()
+    return snapshot
+
+
+async def calculate(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    source_id: uuid.UUID,
+    assumptions: engine.ProfitAssumptions,
+) -> tuple[dict[str, Any], ProfitBaseline, engine.ProfitSensitivityResult]:
+    baseline = await resolve_profit_baseline(db, tenant_id=tenant_id, source_id=source_id)
+    try:
+        result = engine.simulate_profit(
+            baseline=engine.ProfitBaseline(
+                revenue=baseline.revenue,
+                cogs=baseline.cogs,
+                currency=baseline.currency,
+            ),
+            assumptions=assumptions,
+        )
+    except engine.ScenarioCalculationError as exc:
+        raise ScenarioServiceError(str(exc)) from exc
+    return _result_document(result), baseline, result
+
+
+def _assumptions_from_scenario(scenario: WhatIfScenario) -> engine.ProfitAssumptions:
+    try:
+        values = scenario.assumptions
+        return engine.ProfitAssumptions(
+            supplier_cost_change_pct=Decimal(str(values["supplier_cost_change_pct"])),
+            selling_price_change_pct=Decimal(str(values["selling_price_change_pct"])),
+            volume_change_pct=Decimal(str(values["volume_change_pct"])),
+        )
+    except (KeyError, TypeError, ArithmeticError, ValueError) as exc:
+        raise ScenarioServiceError(
+            "saved scenario has unreadable assumptions; save a new scenario"
+        ) from exc
+
+
+async def capabilities(db: AsyncSession, *, tenant_id: uuid.UUID) -> list[SourceCapabilityRead]:
+    sources = await list_candidate_sources(db, tenant_id=tenant_id)
+    output: list[SourceCapabilityRead] = []
+    for source in sources:
+        try:
+            baseline = await resolve_profit_baseline(db, tenant_id=tenant_id, source_id=source.id)
+        except BaselineUnavailable as exc:
+            output.append(
+                SourceCapabilityRead(
+                    source_id=source.id,
+                    source_name=source.name,
+                    source_type=source.source_type,
+                    snapshot_mode=source.snapshot_mode,
+                    supported=False,
+                    code=exc.code,
+                    detail=exc.detail,
+                    missing_concepts=exc.missing,
+                )
+            )
+            continue
+        output.append(
+            SourceCapabilityRead(
+                source_id=baseline.source_id,
+                source_name=baseline.source_name,
+                source_type=source.source_type,
+                snapshot_mode=baseline.snapshot_mode,
+                supported=True,
+                code="ready",
+                detail=(
+                    f"{baseline.currency} {baseline.revenue:,.2f} revenue, "
+                    f"{baseline.currency} {baseline.cogs:,.2f} COGS from "
+                    f"{baseline.rows_considered} complete rows"
+                ),
+                currency=baseline.currency,
+                revenue=baseline.revenue,
+                cogs=baseline.cogs,
+                rows_considered=baseline.rows_considered,
+                rows_skipped=0,
+            )
+        )
+    return output
+
+
+async def save(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    name: str,
+    source_id: uuid.UUID,
+    assumptions: engine.ProfitAssumptions,
+) -> WhatIfScenario:
+    result_document, baseline, _result = await calculate(
+        db,
+        tenant_id=tenant_id,
+        source_id=source_id,
+        assumptions=assumptions,
+    )
+    scenario = WhatIfScenario(
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        name=name,
+        scenario_type=engine.SCENARIO_TYPE,
+        source_id=baseline.source_id,
+        status="calculated",
+        assumptions={
+            "supplier_cost_change_pct": str(assumptions.supplier_cost_change_pct),
+            "selling_price_change_pct": str(assumptions.selling_price_change_pct),
+            "volume_change_pct": str(assumptions.volume_change_pct),
+        },
+        baseline_snapshot=baseline.to_snapshot(),
+        result=result_document,
+        provenance=_provenance_document(baseline),
+    )
+    db.add(scenario)
+    await db.flush()
+    await audit_service.emit(
+        db,
+        tenant_id=tenant_id,
+        event_type=audit_types.SCENARIO_SAVED,
+        actor_user_id=user_id,
+        subject_type="whatif_scenario",
+        subject_id=scenario.id,
+        metadata={
+            "scenario_type": scenario.scenario_type,
+            "source_id": str(scenario.source_id),
+            "assumptions": scenario.assumptions,
+        },
+        message=f"profit scenario {name!r} saved",
+    )
+    return scenario
+
+
+async def get(db: AsyncSession, *, tenant_id: uuid.UUID, scenario_id: uuid.UUID) -> WhatIfScenario:
+    scenario = (
+        await db.execute(
+            select(WhatIfScenario).where(
+                WhatIfScenario.id == scenario_id,
+                WhatIfScenario.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if scenario is None:
+        raise ScenarioNotFound("scenario not found")
+    return scenario
+
+
+async def list_scenarios(
+    db: AsyncSession, *, tenant_id: uuid.UUID, limit: int = 100
+) -> list[WhatIfScenario]:
+    statement = (
+        select(WhatIfScenario)
+        .where(WhatIfScenario.tenant_id == tenant_id)
+        .order_by(WhatIfScenario.created_at.desc())
+        .limit(limit)
+    )
+    return list((await db.execute(statement)).scalars().all())
+
+
+async def compare_scenarios(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    scenario_ids: list[uuid.UUID],
+) -> ScenarioCompareResponse:
+    scenarios = [
+        await get(db, tenant_id=tenant_id, scenario_id=scenario_id) for scenario_id in scenario_ids
+    ]
+    if any(not to_read(scenario).supported for scenario in scenarios):
+        raise ScenarioServiceError("only scenarios in the current profit format can be compared")
+    source_ids = {scenario.source_id for scenario in scenarios}
+    currencies = {str((scenario.result or {}).get("currency", "")) for scenario in scenarios}
+    if len(source_ids) != 1:
+        raise ScenarioServiceError("scenarios must use the same source to be compared")
+    if len(currencies) != 1 or "" in currencies:
+        raise ScenarioServiceError("scenarios must use the same known currency to be compared")
+    return ScenarioCompareResponse(
+        source_id=next(iter(source_ids)),
+        currency=next(iter(currencies)),
+        scenarios=[to_read(scenario) for scenario in scenarios],
+    )
+
+
+async def recalculate(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    scenario_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+) -> WhatIfScenario:
+    scenario = await get(db, tenant_id=tenant_id, scenario_id=scenario_id)
+    assumptions = _assumptions_from_scenario(scenario)
+    try:
+        result_document, baseline, _result = await calculate(
+            db,
+            tenant_id=tenant_id,
+            source_id=scenario.source_id,
+            assumptions=assumptions,
+        )
+    except BaselineUnavailable as exc:
+        scenario.status = "stale"
+        scenario.stale_reason = exc.detail[:500]
+        await db.flush()
+        raise
+
+    scenario.result = result_document
+    scenario.baseline_snapshot = baseline.to_snapshot()
+    scenario.provenance = _provenance_document(baseline)
+    scenario.status = "calculated"
+    scenario.stale_reason = None
+    await db.flush()
+    await audit_service.emit(
+        db,
+        tenant_id=tenant_id,
+        event_type=audit_types.SCENARIO_RECALCULATED,
+        actor_user_id=user_id,
+        subject_type="whatif_scenario",
+        subject_id=scenario.id,
+        metadata={
+            "source_id": str(scenario.source_id),
+            "ingestion_job_ids": [str(job_id) for job_id in baseline.ingestion_job_ids],
+        },
+        message=f"profit scenario {scenario.name!r} recalculated",
+    )
+    return scenario
+
+
+async def mark_stale_scenarios(db: AsyncSession, *, tenant_id: uuid.UUID) -> int:
+    scenarios = (
+        (
+            await db.execute(
+                select(WhatIfScenario).where(
+                    WhatIfScenario.tenant_id == tenant_id,
+                    WhatIfScenario.status == "calculated",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    current_by_source: dict[uuid.UUID, dict[str, Any] | None] = {}
+    updated = 0
+    for scenario in scenarios:
+        if scenario.source_id not in current_by_source:
+            try:
+                baseline = await resolve_profit_baseline(
+                    db, tenant_id=tenant_id, source_id=scenario.source_id
+                )
+                current_by_source[scenario.source_id] = baseline.to_snapshot()
+            except BaselineUnavailable:
+                current_by_source[scenario.source_id] = None
+        current = current_by_source[scenario.source_id]
+        saved = scenario.baseline_snapshot or {}
+        if current is None or not is_baseline_current(
+            saved_snapshot=saved, current_snapshot=current
+        ):
+            scenario.status = "stale"
+            scenario.stale_reason = (
+                "source data changed or no longer supports a verified profit baseline"
+            )
+            updated += 1
+    if updated:
+        await db.flush()
+    return updated
+
+
+def _decimal_or_none(value: Any) -> Decimal | None:
+    return Decimal(str(value)) if value is not None else None
+
+
+def result_read(document: dict[str, Any]) -> ScenarioResultRead:
+    baseline = document["baseline"]
+    scenario = document["scenario"]
+    delta = document["delta"]
+    assumptions = document["assumptions"]
+    return ScenarioResultRead(
+        scenario_type=document["scenario_type"],
+        formula_version=int(document["formula_version"]),
+        currency=document["currency"],
+        assumptions=assumptions,
+        baseline=ProfitMetricsRead(
+            revenue=Decimal(str(baseline["revenue"])),
+            cogs=Decimal(str(baseline["cogs"])),
+            gross_profit=Decimal(str(baseline["gross_profit"])),
+            gross_margin_pct=_decimal_or_none(baseline.get("gross_margin_pct")),
+        ),
+        scenario=ProfitMetricsRead(
+            revenue=Decimal(str(scenario["revenue"])),
+            cogs=Decimal(str(scenario["cogs"])),
+            gross_profit=Decimal(str(scenario["gross_profit"])),
+            gross_margin_pct=_decimal_or_none(scenario.get("gross_margin_pct")),
+        ),
+        delta=ScenarioDeltaRead(
+            gross_profit=Decimal(str(delta["gross_profit"])),
+            gross_profit_pct=_decimal_or_none(delta.get("gross_profit_pct")),
+            gross_margin_percentage_points=_decimal_or_none(
+                delta.get("gross_margin_percentage_points")
+            ),
+        ),
+        explanation=document["explanation"],
+        limitations=list(document["limitations"]),
+    )
+
+
+def provenance_read(document: dict[str, Any]) -> ScenarioProvenanceRead:
+    return ScenarioProvenanceRead.model_validate(document)
+
+
+def to_read(scenario: WhatIfScenario) -> ScenarioRead:
+    result: ScenarioResultRead | None = None
+    provenance: ScenarioProvenanceRead | None = None
+    supported = scenario.scenario_type == engine.SCENARIO_TYPE
+    if supported:
+        try:
+            result = result_read(scenario.result or {})
+            provenance = provenance_read(scenario.provenance or {})
+        except (ArithmeticError, KeyError, TypeError, ValueError):
+            supported = False
+
+    return ScenarioRead(
+        id=scenario.id,
+        name=scenario.name,
+        scenario_type=scenario.scenario_type,
+        source_id=scenario.source_id,
+        status=scenario.status if supported else "unsupported",
+        assumptions=scenario.assumptions or {},
+        result=result,
+        provenance=provenance,
+        is_stale=scenario.status == "stale",
+        stale_reason=scenario.stale_reason,
+        created_by_user_id=scenario.created_by_user_id,
+        created_at=scenario.created_at,
+        updated_at=scenario.updated_at,
+        supported=supported,
+        compatibility_note=(
+            None
+            if supported
+            else "This saved scenario uses an unsupported format. Its historical "
+            "values are preserved but cannot be represented as profit metrics."
+        ),
+    )
+
+
+def to_summary(scenario: WhatIfScenario) -> ScenarioSummaryRead:
+    detail = to_read(scenario)
+    result = detail.result
+    return ScenarioSummaryRead(
+        id=scenario.id,
+        name=scenario.name,
+        scenario_type=scenario.scenario_type,
+        source_id=scenario.source_id,
+        status=detail.status,
+        currency=result.currency if result is not None else None,
+        baseline_gross_profit=(result.baseline.gross_profit if result is not None else None),
+        scenario_gross_profit=(result.scenario.gross_profit if result is not None else None),
+        gross_profit_change=(result.delta.gross_profit if result is not None else None),
+        is_stale=scenario.status == "stale",
+        created_at=scenario.created_at,
+        supported=detail.supported,
+    )
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\db\models\scenario.py ===
+# app/db/models/scenario.py
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from sqlalchemy import ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.base import Base, TenantMixin, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class WhatIfScenario(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
+    """
+    One saved what-if scenario and the numbers it produced.
+
+    Why the baseline is frozen here and not recomputed on every read:
+    source data changes as ingestion runs. A manager who saved a scenario
+    last week must see the numbers that were true when they saved it, not
+    silently different ones. ``baseline_snapshot`` and ``result`` are the
+    calculation-time record; ``provenance`` is what makes those numbers
+    reproducible and auditable (source, snapshot mode, ingestion jobs,
+    confirmed revenue/COGS/currency columns, and row coverage).
+
+    Status:
+      - 'calculated'  - saved together with a successful calculation
+      - 'stale'       - the source's baseline has since changed. The
+                        stored numbers are untouched; recalculating is an
+                        explicit user action.
+
+    Deliberately NOT stored: the raw business rows. Only the validated
+    assumptions, calculated profit metrics, frozen baseline, and evidence
+    references needed to audit or redo the calculation live here.
+    """
+
+    __tablename__ = "whatif_scenarios"
+
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    scenario_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("data_sources.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="calculated", index=True
+    )
+    assumptions: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    baseline_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    stale_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    __table_args__ = (
+        Index("ix_whatif_scenarios_tenant_created", "tenant_id", "created_at"),
+        Index("ix_whatif_scenarios_tenant_source", "tenant_id", "source_id"),
+    )
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\db\seed_concepts.py ===
+# app/db/seed_concepts.py
+"""
+Canonical concept catalog.
+
+Global (not tenant-scoped). Idempotent: running seed_canonical_concepts()
+repeatedly reconciles the catalog to this file.
+
+Two hard rules:
+  1. No derived metrics. 'Gross Margin' is a KPIDefinition (Step 8).
+  2. No industry-specific concepts. Those go in Industry Packs (Step 24).
+"""
+from __future__ import annotations
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.semantic import CanonicalConcept
+
+# (key, display_name, domain, kind, value_type, synonyms, description)
+CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
+    # ---------- Procurement (5) ----------
+    (
+        "Procurement.Supplier", "Supplier", "Procurement", "entity", "entity",
+        ["supplier", "vendor", "supplier_name", "vendor_name", "supplier_id", "vendor_id"],
+        "A party that provides goods or services to the organisation.",
+    ),
+    (
+        "Procurement.Purchase", "Purchase", "Procurement", "fact", "number",
+        ["purchase", "purchase_line", "po_line", "line_item"],
+        "A single purchased line: quantity of a product at a price on a date.",
+    ),
+    (
+        "Procurement.PurchaseOrder", "Purchase Order", "Procurement", "fact", "string",
+        ["purchase_order", "po", "po_number", "po_id", "order_number"],
+        "A formal order placed with a supplier.",
+    ),
+    (
+        "Procurement.PurchasePrice", "Purchase Price", "Procurement", "attribute", "number",
+        ["purchase_price", "buy_price", "cost_price", "unit_cost", "unit_price"],
+        "The per-unit price paid to a supplier.",
+    ),
+    (
+        "Procurement.LeadTime", "Lead Time", "Procurement", "attribute", "number",
+        ["lead_time", "delivery_days", "lead_time_days"],
+        "Days from order placement to delivery.",
+    ),
+
+    # ---------- Inventory (6) ----------
+    (
+        "Inventory.Product", "Product", "Inventory", "entity", "entity",
+        ["product", "product_name", "item", "item_name", "material", "product_id", "item_id"],
+        "A physical item that is bought, sold, or stocked.",
+    ),
+    (
+        "Inventory.SKU", "SKU", "Inventory", "attribute", "string",
+        ["sku", "sku_code", "product_code", "item_code", "part_number"],
+        "A stock-keeping unit identifier for a product.",
+    ),
+    (
+        "Inventory.StockLevel", "Stock Level", "Inventory", "attribute", "number",
+        ["stock_level", "stock", "on_hand", "quantity_on_hand", "qty_on_hand", "inventory"],
+        "The quantity of a product currently held.",
+    ),
+    (
+        "Inventory.StockMovement", "Stock Movement", "Inventory", "fact", "number",
+        ["stock_movement", "movement", "inventory_movement", "transfer"],
+        "A change to a stock level: receipt, issue, or transfer.",
+    ),
+    (
+        "Inventory.Warehouse", "Warehouse", "Inventory", "entity", "entity",
+        ["warehouse", "warehouse_name", "location", "site", "warehouse_id"],
+        "A physical location where stock is held.",
+    ),
+    (
+        "Inventory.ReorderPoint", "Reorder Point", "Inventory", "attribute", "number",
+        ["reorder_point", "reorder_level", "min_stock", "min_level", "safety_stock"],
+        "The stock level at which a new order is triggered.",
+    ),
+
+    # ---------- Finance (7) ----------
+    (
+        "Finance.Revenue", "Revenue", "Finance", "attribute", "number",
+        [
+            "revenue", "sales", "sale", "sales_amount", "total_sales",
+            "net_sales", "gross_sales", "invoice_total",
+        ],
+        "Income from sales of goods or services.",
+    ),
+    (
+        "Finance.Expense", "Expense", "Finance", "attribute", "number",
+        ["expense", "expenses", "spend"],
+        "An outflow of money to run the business.",
+    ),
+    (
+        "Finance.Cost", "Cost", "Finance", "attribute", "number",
+        ["cost", "total_cost", "direct_cost", "operating_cost", "operating_expense"],
+        "A general cost amount; not necessarily cost of goods sold.",
+    ),
+    (
+        "Finance.CostOfGoodsSold", "Cost of Goods Sold", "Finance", "attribute", "number",
+        ["cogs", "cost_of_goods_sold", "cost_of_goods"],
+        "Direct cost attributable to goods or services sold in the same reporting baseline.",
+    ),
+    (
+        "Finance.Payment", "Payment", "Finance", "fact", "number",
+        ["payment", "payment_amount", "paid", "payment_date"],
+        "A movement of money in or out.",
+    ),
+    (
+        "Finance.Invoice", "Invoice", "Finance", "fact", "string",
+        ["invoice", "invoice_number", "invoice_id", "bill_number", "invoice_no"],
+        "A request for payment for goods or services.",
+    ),
+    (
+        "Finance.Currency", "Currency", "Finance", "attribute", "string",
+        ["currency", "currency_code", "ccy"],
+        "The unit of money in which amounts are denominated.",
+    ),
+
+    # ---------- Sales (5) ----------
+    (
+        "Sales.Customer", "Customer", "Sales", "entity", "entity",
+        [
+            "customer", "customer_name", "client", "client_name",
+            "customer_id", "client_id", "cust_nm",
+        ],
+        "A party that buys goods or services from the organisation.",
+    ),
+    (
+        "Sales.Sale", "Sale", "Sales", "fact", "number",
+        ["sale", "sales_line", "sales_order_line", "order_line"],
+        "A single sold line: quantity of a product at a price on a date.",
+    ),
+    (
+        "Sales.SalesOrder", "Sales Order", "Sales", "fact", "string",
+        ["sales_order", "so", "so_number", "order_number", "order_id"],
+        "A formal order received from a customer.",
+    ),
+    (
+        "Sales.TransactionId", "Sales Transaction ID", "Sales", "attribute", "string",
+        [
+            "transaction_id", "transaction_number", "transaction_ref",
+            "sales_transaction_id", "receipt_id", "ticket_ref",
+        ],
+        "A stable identifier for one customer transaction or purchase.",
+    ),
+    (
+        "Sales.TransactionDate", "Sales Transaction Date", "Sales", "attribute", "date",
+        [
+            "sales_date", "purchase_date", "sale_date", "transaction_day",
+        ],
+        "The date on which a customer transaction occurred.",
+    ),
+    (
+        "Sales.SellingPrice", "Selling Price", "Sales", "attribute", "number",
+        ["selling_price", "sale_price", "price", "unit_price", "list_price"],
+        "The per-unit price charged to a customer.",
+    ),
+    (
+        "Sales.SalesChannel", "Sales Channel", "Sales", "attribute", "string",
+        ["channel", "sales_channel", "source", "channel_name"],
+        "The route through which a sale is made (web, retail, wholesale, ...).",
+    ),
+
+    # ---------- Operations (5) ----------
+    (
+        "Operations.Production", "Production", "Operations", "fact", "number",
+        ["production", "production_run", "batch", "manufacturing_run"],
+        "A manufacturing or assembly run producing goods.",
+    ),
+    (
+        "Operations.ProductionCost", "Production Cost", "Operations", "attribute", "number",
+        ["production_cost", "manufacturing_cost", "conversion_cost"],
+        "The cost incurred to produce a quantity of goods.",
+    ),
+    (
+        "Operations.Capacity", "Capacity", "Operations", "attribute", "number",
+        ["capacity", "capacity_units", "max_capacity"],
+        "The maximum output a line, site, or resource can produce in a period.",
+    ),
+    (
+        "Operations.Downtime", "Downtime", "Operations", "attribute", "number",
+        ["downtime", "downtime_minutes", "downtime_hours", "stop_time"],
+        "Time during which a resource is unavailable.",
+    ),
+    (
+        "Operations.Delivery", "Delivery", "Operations", "fact", "date",
+        ["delivery", "delivery_date", "shipped_date", "received_date", "dispatch_date"],
+        "A physical handover of goods to or from a party.",
+    ),
+
+    # ---------- Management (4) ----------
+    (
+        "Management.KPI", "KPI", "Management", "entity", "entity",
+        ["kpi", "kpi_name", "metric", "metric_name", "indicator"],
+        "A named metric tracked over time.",
+    ),
+    (
+        "Management.Target", "Target", "Management", "attribute", "number",
+        ["target", "target_value", "goal", "objective", "quota"],
+        "A desired value for a metric in a period.",
+    ),
+    (
+        "Management.Budget", "Budget", "Management", "attribute", "number",
+        ["budget", "budget_amount", "planned_spend"],
+        "An allocated amount for a cost category or period.",
+    ),
+    (
+        "Management.BusinessUnit", "Business Unit", "Management", "entity", "entity",
+        [
+            "business_unit", "bu", "division", "department", "segment", "unit",
+            "depot", "depot_name", "depot_id",
+        ],
+        "An organisational subdivision used for reporting.",
+    ),
+]
+
+
+# Generic attributes most datasets carry. Not domain concepts, but needed as
+# mapping targets so common columns like 'date' or 'amount' have a home.
+GENERIC_ATTRIBUTES: list[tuple[str, str, str, str, str, list[str], str | None]] = [
+    (
+        "Common.Date", "Date", "Common", "attribute", "date",
+        [
+            "date", "transaction_date", "order_date", "invoice_date",
+            "record_date", "created_date",
+        ],
+        "A calendar date associated with a record.",
+    ),
+    (
+        "Common.Quantity", "Quantity", "Common", "attribute", "number",
+        ["quantity", "qty", "count", "units", "quantity_sold", "quantity_ordered"],
+        "A count of items or units.",
+    ),
+    (
+        "Common.Amount", "Amount", "Common", "attribute", "number",
+        ["amount", "total", "value", "total_amount", "line_total", "sum"],
+        "A monetary value.",
+    ),
+    (
+        "Common.Name", "Name", "Common", "attribute", "string",
+        ["name", "title", "label", "description"],
+        "A human-readable label for a record.",
+    ),
+]
+
+
+ALL_CONCEPTS = CONCEPTS + GENERIC_ATTRIBUTES
+
+
+async def seed_canonical_concepts(db: AsyncSession) -> int:
+    """
+    Idempotent reconciliation of the global canonical concept catalog.
+
+    Inserts concepts that don't exist and updates mutable fields on existing
+    ones (so edits to this file are picked up on re-run). Never deletes.
+
+    Returns the number of concepts reconciled (inserted or updated).
+    """
+    existing: dict[str, CanonicalConcept] = {
+        c.key: c
+        for c in (await db.execute(select(CanonicalConcept))).scalars().all()
+    }
+
+    reconciled = 0
+    for key, display_name, domain, kind, value_type, synonyms, description in ALL_CONCEPTS:
+        if key in existing:
+            c = existing[key]
+            c.display_name = display_name
+            c.domain = domain
+            c.kind = kind
+            c.value_type = value_type
+            c.synonyms = synonyms
+            c.description = description
+        else:
+            db.add(CanonicalConcept(
+                key=key,
+                display_name=display_name,
+                domain=domain,
+                kind=kind,
+                value_type=value_type,
+                synonyms=synonyms,
+                description=description,
+            ))
+        reconciled += 1
+
+    await db.flush()
+    return reconciled
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\app\web\routes\scenarios.py ===
+# app/web/routes/scenarios.py
+"""
+Scenario Lab HTML routes (Jinja2 + HTMX, no build step).
+
+The page is rendered server-side so the simulator works with JavaScript
+disabled for everything except the HTMX preview/save calls. Every number
+in the page comes from the same service the API uses; the HTML layer does
+no arithmetic beyond formatting.
+"""
+
+from __future__ import annotations
+
+import hmac
+import uuid
+from decimal import Decimal, InvalidOperation
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import require_permission
+from app.core.config import settings
+from app.db.session import get_db
+from app.schemas.scenarios import ProfitAssumptions
+from app.services.scenarios import engine
+from app.services.scenarios import service as scenario_service
+from app.services.scenarios.baseline import BaselineUnavailable
+from app.web.deps import HtmlUser
+from app.web.templating import base_context, templates
+
+router = APIRouter()
+
+PAGE_LIMIT = 50
+
+
+async def require_scenario_csrf(request: Request) -> None:
+    """Accept the standard CSRF header or the token carried by HTML forms."""
+    cookie_token = request.cookies.get(settings.csrf_cookie_name)
+    submitted_token = request.headers.get(settings.csrf_header_name)
+    if not submitted_token:
+        form = await request.form()
+        token = form.get("csrf_token")
+        submitted_token = token if isinstance(token, str) else None
+    if (
+        not cookie_token
+        or not submitted_token
+        or not hmac.compare_digest(cookie_token, submitted_token)
+    ):
+        raise HTTPException(status_code=403, detail="csrf check failed")
+
+
+def _fmt_money(value: Decimal | str | None) -> str:
+    """Group thousands, keep two decimals. Readability only, no rounding."""
+    if value is None:
+        return "(none)"
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
+    return f"{value:,.2f}"
+
+
+def _fmt_pct(value: Decimal | str | None) -> str:
+    if value is None:
+        return "n/a"
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value}%"
+
+
+templates.env.filters["money"] = _fmt_money
+templates.env.filters["pct"] = _fmt_pct
+
+
+async def _page_context(db: AsyncSession, *, tenant_id: uuid.UUID) -> dict[str, Any]:
+    capabilities = await scenario_service.capabilities(db, tenant_id=tenant_id)
+    scenarios = await scenario_service.list_scenarios(db, tenant_id=tenant_id, limit=PAGE_LIMIT)
+    return {
+        "capabilities": capabilities,
+        "selected_source": next((c for c in capabilities if c.supported), None),
+        "scenarios": [scenario_service.to_summary(s) for s in scenarios],
+        "limitations": engine.default_limitations(),
+    }
+
+
+@router.get("/scenarios", response_class=HTMLResponse)
+async def scenarios_page(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: HtmlUser,
+) -> HTMLResponse:
+    context = await _page_context(db, tenant_id=user.tenant_id)
+    context.update(
+        request=request,
+        user=user,
+        **base_context(),
+        loop_stage="scenarios",
+        active_nav="scenarios",
+        tenant_name=str(user.tenant_id),
+        user_email=user.email,
+        preview=None,
+        error=None,
+        form={},
+        csrf_token=request.cookies.get(settings.csrf_cookie_name, ""),
+    )
+    return templates.TemplateResponse(request, "scenarios/index.html", context)
+
+
+@router.post("/scenarios/preview", response_class=HTMLResponse)
+async def scenarios_preview(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: HtmlUser,
+    source_id: Annotated[str, Form()],
+    supplier_cost_change_pct: Annotated[str, Form()],
+    selling_price_change_pct: Annotated[str, Form()],
+    volume_change_pct: Annotated[str, Form()],
+) -> HTMLResponse:
+    """
+    HTMX target. Returns just the result fragment. A bad input renders an
+    inline explanation rather than a broken page.
+    """
+    error: str | None = None
+    missing: list[str] = []
+    preview = None
+    try:
+        assumptions = ProfitAssumptions(
+            supplier_cost_change_pct=Decimal(supplier_cost_change_pct),
+            selling_price_change_pct=Decimal(selling_price_change_pct),
+            volume_change_pct=Decimal(volume_change_pct),
+        )
+    except ValidationError as exc:
+        assumptions = None
+        error = str(exc)
+    except (InvalidOperation, ValueError):
+        assumptions = None
+        error = "Enter valid finite numbers for all three assumptions."
+
+    if assumptions is None and error is None:
+        error = "Enter valid values for all three assumptions."
+    elif assumptions is not None:
+        try:
+            parsed_source_id = uuid.UUID(source_id)
+        except ValueError:
+            error = "That source identifier is not valid."
+        else:
+            try:
+                result_document, baseline, _result = await scenario_service.calculate(
+                    db,
+                    tenant_id=user.tenant_id,
+                    source_id=parsed_source_id,
+                    assumptions=engine.ProfitAssumptions(
+                        supplier_cost_change_pct=assumptions.supplier_cost_change_pct,
+                        selling_price_change_pct=assumptions.selling_price_change_pct,
+                        volume_change_pct=assumptions.volume_change_pct,
+                    ),
+                )
+            except BaselineUnavailable as exc:
+                error = exc.detail
+                missing = list(exc.missing)
+            except scenario_service.ScenarioServiceError as exc:
+                error = str(exc)
+            else:
+                preview = {
+                    "result": scenario_service.result_read(result_document),
+                    "provenance": baseline.to_snapshot(),
+                    "source_id": baseline.source_id,
+                }
+
+    return templates.TemplateResponse(
+        request,
+        "scenarios/_result.html",
+        {
+            "user": user,
+            "preview": preview,
+            "error": error,
+            "missing": missing,
+            "csrf_token": request.cookies.get(settings.csrf_cookie_name, ""),
+            "form": {
+                "source_id": source_id,
+                "supplier_cost_change_pct": supplier_cost_change_pct,
+                "selling_price_change_pct": selling_price_change_pct,
+                "volume_change_pct": volume_change_pct,
+            },
+        },
+    )
+
+
+@router.post(
+    "/scenarios/save",
+    dependencies=[
+        Depends(require_scenario_csrf),
+        Depends(require_permission("dataset:write")),
+    ],
+)
+async def scenarios_save(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: HtmlUser,
+    name: Annotated[str, Form()],
+    source_id: Annotated[str, Form()],
+    supplier_cost_change_pct: Annotated[str, Form()],
+    selling_price_change_pct: Annotated[str, Form()],
+    volume_change_pct: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Save round-trip: persists then redirects back to the list."""
+    try:
+        assumptions = ProfitAssumptions(
+            supplier_cost_change_pct=Decimal(supplier_cost_change_pct),
+            selling_price_change_pct=Decimal(selling_price_change_pct),
+            volume_change_pct=Decimal(volume_change_pct),
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except (InvalidOperation, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Enter valid finite values for all three assumptions.",
+        ) from exc
+
+    try:
+        parsed_source_id = uuid.UUID(source_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="That source identifier is not valid.",
+        ) from exc
+
+    try:
+        await scenario_service.save(
+            db,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            name=name.strip() or "Untitled scenario",
+            source_id=parsed_source_id,
+            assumptions=engine.ProfitAssumptions(
+                supplier_cost_change_pct=assumptions.supplier_cost_change_pct,
+                selling_price_change_pct=assumptions.selling_price_change_pct,
+                volume_change_pct=assumptions.volume_change_pct,
+            ),
+        )
+    except BaselineUnavailable:
+        # The preview already explained the failure; a stale form submit
+        # just goes back to the page rather than creating a half-record.
+        await db.rollback()
+        return RedirectResponse("/scenarios", status_code=303)
+    await db.commit()
+    return RedirectResponse("/scenarios", status_code=303)
+
+
+@router.post(
+    "/scenarios/{scenario_id}/recalculate",
+    dependencies=[
+        Depends(require_scenario_csrf),
+        Depends(require_permission("dataset:write")),
+    ],
+)
+async def scenarios_recalculate(
+    scenario_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: HtmlUser,
+) -> RedirectResponse:
+    try:
+        await scenario_service.recalculate(
+            db,
+            tenant_id=user.tenant_id,
+            scenario_id=scenario_id,
+            user_id=user.id,
+        )
+    except (scenario_service.ScenarioNotFound, BaselineUnavailable):
+        await db.commit()
+    else:
+        await db.commit()
+    return RedirectResponse("/scenarios", status_code=303)
+
+
+@router.post(
+    "/scenarios/stale-scan",
+    dependencies=[
+        Depends(require_scenario_csrf),
+        Depends(require_permission("dataset:write")),
+    ],
+)
+async def scenarios_stale_scan(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: HtmlUser,
+) -> RedirectResponse:
+    await scenario_service.mark_stale_scenarios(db, tenant_id=user.tenant_id)
+    await db.commit()
+    return RedirectResponse("/scenarios", status_code=303)
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\frontend\templates\scenarios\index.html ===
+{% extends "base.html" %}
+{% block title %}Scenario Lab Â· Sansa{% endblock %}
+
+{% block main %}
+<div class="page-header">
+  <div>
+    <h1>Scenario Lab</h1>
+    <p class="muted">Procurement and gross-profit sensitivity based on your verified financial data.</p>
+  </div>
+</div>
+
+{# ---------- 1. Is any data usable? ---------- #}
+<section class="card">
+  <h2>1. Business data</h2>
+
+  {% if not capabilities %}
+    <p class="muted">No active data sources. Ingest data before running a scenario.</p>
+  {% elif not selected_source %}
+    <div class="alert alert-warning">
+      <strong>This tenant cannot run a profit scenario yet.</strong>
+      <p>{{ capabilities|length }} active source(s) were checked. Each one below says exactly what is missing.</p>
+    </div>
+  {% else %}
+    <p class="muted">Ready source:</p>
+    <p>
+      <strong>{{ selected_source.source_name }}</strong>
+      <span class="badge badge-info">{{ selected_source.source_type }}</span>
+      <span class="badge badge-neutral">{{ selected_source.snapshot_mode }}</span>
+    </p>
+    <p class="muted">
+      {{ selected_source.currency }} {{ selected_source.revenue|money }} revenue Â·
+      {{ selected_source.currency }} {{ selected_source.cogs|money }} COGS Â·
+      {{ selected_source.rows_considered }} complete rows
+    </p>
+  {% endif %}
+
+  {% if capabilities and (not selected_source or capabilities|length > 1) %}
+  <details>
+    <summary class="muted">All sources ({{ capabilities|length }})</summary>
+    <table class="table">
+      <thead>
+        <tr><th>Source</th><th>Mode</th><th>Status</th><th>Detail</th></tr>
+      </thead>
+      <tbody>
+      {% for c in capabilities %}
+        <tr>
+          <td>{{ c.source_name }}</td>
+          <td>{{ c.snapshot_mode }}</td>
+          <td>
+            {% if c.supported %}
+              <span class="badge badge-success">ready</span>
+            {% else %}
+              <span class="badge badge-warning">{{ c.code }}</span>
+            {% endif %}
+          </td>
+          <td class="muted">
+            {{ c.detail }}
+            {% if c.missing_concepts %}
+              <br><em>Needs a confirmed mapping for: {{ c.missing_concepts|join(", ") }}</em>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+</section>
+
+{# ---------- 2. Assumptions ---------- #}
+{% if selected_source %}
+<section class="card">
+  <h2>2. Define the scenario</h2>
+  <form id="scenario-form"
+        hx-post="/scenarios/preview"
+        hx-target="#scenario-result"
+        hx-swap="innerHTML"
+        hx-trigger="submit">
+    <input type="hidden" name="source_id" value="{{ selected_source.source_id }}">
+    <label for="supplier_cost_change_pct">Supplier cost / COGS change (%)</label>
+    <input id="supplier_cost_change_pct" name="supplier_cost_change_pct"
+           type="number" value="12" step="0.1" min="0" max="30" required>
+    <label for="selling_price_change_pct">Selling price change (%)</label>
+    <input id="selling_price_change_pct" name="selling_price_change_pct"
+           type="number" value="0" step="0.1" min="-10" max="20" required>
+    <label for="volume_change_pct">Sales volume change (%)</label>
+    <input id="volume_change_pct" name="volume_change_pct"
+           type="number" value="0" step="0.1" min="-30" max="30" required>
+    <p class="muted">Volume scales revenue and COGS together. Selling price affects revenue; supplier cost affects COGS. Demand elasticity is not modeled.</p>
+    <button type="submit" class="btn">Calculate</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>3. Review the impact</h2>
+  <div id="scenario-result">
+    <p class="muted">Change an assumption and press Calculate. Nothing is saved until you name and save the scenario.</p>
+  </div>
+</section>
+{% endif %}
+
+{# ---------- 4. Saved scenarios ---------- #}
+<section class="card">
+  <h2>Saved scenarios</h2>
+  <form method="post" action="/scenarios/stale-scan" style="margin-bottom:.75rem">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn">Check for stale scenarios</button>
+    <span class="muted">Flags scenarios whose source data has changed since they were calculated. Saved numbers are never overwritten.</span>
+  </form>
+
+  {% if scenarios %}
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Baseline gross profit</th><th>Scenario gross profit</th><th>Change</th>
+        <th>Status</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for s in scenarios %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td class="cell-num">
+          {% if s.supported %}{{ s.currency }} {{ s.baseline_gross_profit|money }}{% else %}Unavailable{% endif %}
+        </td>
+        <td class="cell-num">
+          {% if s.supported %}{{ s.currency }} {{ s.scenario_gross_profit|money }}{% else %}Unavailable{% endif %}
+        </td>
+        <td class="cell-num">
+          {% if s.supported %}{{ s.currency }} {{ s.gross_profit_change|money }}{% else %}Unavailable{% endif %}
+        </td>
+        <td>
+          {% if not s.supported %}
+            <span class="badge badge-warning">unsupported legacy scenario</span>
+          {% elif s.is_stale %}
+            <span class="badge badge-danger">stale</span>
+          {% else %}
+            <span class="badge badge-success">{{ s.status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if s.supported %}
+            <form method="post" action="/scenarios/{{ s.id }}/recalculate" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn">Recalculate</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No saved scenarios yet.</p>
+  {% endif %}
+</section>
+
+{# ---------- 5. Assumptions / limitations ---------- #}
+<section class="card">
+  <h2>What these numbers assume</h2>
+  <ul class="muted">
+    {% for l in limitations %}<li>{{ l }}</li>{% endfor %}
+  </ul>
+  <p class="muted">
+    This is a deterministic sensitivity calculation over data already in Sansa.
+    It does not forecast demand, place orders, or write to the ERP.
+  </p>
+</section>
+{% endblock %}
+
+
+=== FILE: C:\Users\LocalAdmin\Documents\platform\frontend\templates\scenarios\_result.html ===
+{% if error %}
+<div class="alert alert-warning">
+  <strong>Cannot calculate this scenario.</strong>
+  <p>{{ error }}</p>
+  {% if missing %}
+  <p class="muted">Confirm a semantic mapping for: {{ missing|join(", ") }}.</p>
+  {% endif %}
+</div>
+{% else %}
+{% set r = preview.result %}
+{% set p = preview.provenance %}
+<table class="table">
+  <thead>
+    <tr>
+      <th>Metric</th>
+      <th>Baseline</th>
+      <th>Scenario</th>
+      <th>Change</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Revenue</td>
+      <td class="cell-num">{{ r.currency }} {{ r.baseline.revenue|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ r.scenario.revenue|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ (r.scenario.revenue - r.baseline.revenue)|money }}</td>
+    </tr>
+    <tr>
+      <td>COGS</td>
+      <td class="cell-num">{{ r.currency }} {{ r.baseline.cogs|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ r.scenario.cogs|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ (r.scenario.cogs - r.baseline.cogs)|money }}</td>
+    </tr>
+    <tr>
+      <td>Gross profit</td>
+      <td class="cell-num">{{ r.currency }} {{ r.baseline.gross_profit|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ r.scenario.gross_profit|money }}</td>
+      <td class="cell-num">
+        {{ r.currency }} {{ r.delta.gross_profit|money }}
+        {% if r.delta.gross_profit_pct is not none %}({{ r.delta.gross_profit_pct|pct }}){% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td>Gross margin</td>
+      <td class="cell-num">{{ r.baseline.gross_margin_pct|pct }}</td>
+      <td class="cell-num">{{ r.scenario.gross_margin_pct|pct }}</td>
+      <td class="cell-num">
+        {% if r.delta.gross_margin_percentage_points is not none %}
+          {{ r.delta.gross_margin_percentage_points|pct }} percentage points
+        {% else %}n/a{% endif %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="alert alert-info">{{ r.explanation }}</div>
+
+<h3>Evidence</h3>
+<ul class="muted">
+  <li>Source: {{ p.source_name }} ({{ p.snapshot_mode }})</li>
+  <li>Revenue: {{ p.revenue_concept }} mapped to {{ p.revenue_column }}</li>
+  <li>COGS: {{ p.cogs_concept }} mapped to {{ p.cogs_column }}</li>
+  <li>Currency: {{ p.currency_concept }} mapped to {{ p.currency_column }} ({{ p.currency }})</li>
+  <li>{{ p.rows_considered }} complete rows used</li>
+  {% if p.ingestion_job_ids %}
+  <li>Ingestion jobs: {{ p.ingestion_job_ids|join(", ") }}</li>
+  {% endif %}
+  {% if p.latest_ingested_at %}<li>Data ingested at {{ p.latest_ingested_at }}</li>{% endif %}
+</ul>
+
+<div class="alert alert-warning">
+  The calculation requires confirmed revenue, cost-of-goods-sold, and currency mappings
+  from this source. It does not treat generic operating costs or purchase spend as COGS.
+</div>
+<ul class="muted">
+  {% for l in r.limitations %}<li>{{ l }}</li>{% endfor %}
+</ul>
+
+<form method="post" action="/scenarios/save" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="source_id" value="{{ preview.source_id }}">
+  <input type="hidden" name="supplier_cost_change_pct" value="{{ r.assumptions.supplier_cost_change_pct }}">
+  <input type="hidden" name="selling_price_change_pct" value="{{ r.assumptions.selling_price_change_pct }}">
+  <input type="hidden" name="volume_change_pct" value="{{ r.assumptions.volume_change_pct }}">
+  <input type="text" name="name" placeholder="Name this scenario" maxlength="200" required style="width:18rem">
+  <button type="submit" class="btn">Save scenario</button>
+  <span class="muted">Saves the baseline as it is now, so the numbers stay reproducible.</span>
+</form>
+{% endif %}
+
+

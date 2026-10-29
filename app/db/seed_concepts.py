@@ -77,7 +77,7 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
         "The stock level at which a new order is triggered.",
     ),
 
-    # ---------- Finance (6) ----------
+    # ---------- Finance (7) ----------
     (
         "Finance.Revenue", "Revenue", "Finance", "attribute", "number",
         [
@@ -93,11 +93,13 @@ CONCEPTS: list[tuple[str, str, str, str, str, list[str], str | None]] = [
     ),
     (
         "Finance.Cost", "Cost", "Finance", "attribute", "number",
-        [
-            "cost", "total_cost", "direct_cost", "cogs", "cost_of_goods",
-            "operating_cost", "operating_expense",
-        ],
-        "Money spent to produce or acquire something.",
+        ["cost", "total_cost", "direct_cost", "operating_cost", "operating_expense"],
+        "A general cost amount; not necessarily cost of goods sold.",
+    ),
+    (
+        "Finance.CostOfGoodsSold", "Cost of Goods Sold", "Finance", "attribute", "number",
+        ["cogs", "cost_of_goods_sold", "cost_of_goods"],
+        "Direct cost attributable to goods or services sold in the same reporting baseline.",
     ),
     (
         "Finance.Payment", "Payment", "Finance", "fact", "number",

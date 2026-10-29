@@ -5,7 +5,7 @@
 <div class="page-header">
   <div>
     <h1>Scenario Lab</h1>
-    <p class="muted">Supplier price sensitivity &mdash; what existing purchase spend would cost at a different price level.</p>
+    <p class="muted">Procurement and gross-profit sensitivity based on your verified financial data.</p>
   </div>
 </div>
 
@@ -17,7 +17,7 @@
     <p class="muted">No active data sources. Ingest data before running a scenario.</p>
   {% elif not selected_source %}
     <div class="alert alert-warning">
-      <strong>This tenant cannot run the supplier-spend scenario yet.</strong>
+      <strong>This tenant cannot run a profit scenario yet.</strong>
       <p>{{ capabilities|length }} active source(s) were checked. Each one below says exactly what is missing.</p>
     </div>
   {% else %}
@@ -28,10 +28,9 @@
       <span class="badge badge-neutral">{{ selected_source.snapshot_mode }}</span>
     </p>
     <p class="muted">
-      {{ selected_source.supplier_count }} suppliers ·
-      baseline spend {{ selected_source.total_spend|money }} ·
-      {{ selected_source.rows_considered - (selected_source.rows_skipped or 0) }} usable rows
-      {% if selected_source.rows_skipped %}({{ selected_source.rows_skipped }} skipped){% endif %}
+      {{ selected_source.currency }} {{ selected_source.revenue|money }} revenue ·
+      {{ selected_source.currency }} {{ selected_source.cogs|money }} COGS ·
+      {{ selected_source.rows_considered }} complete rows
     </p>
   {% endif %}
 
@@ -78,19 +77,16 @@
         hx-swap="innerHTML"
         hx-trigger="submit">
     <input type="hidden" name="source_id" value="{{ selected_source.source_id }}">
-    <label for="supplier_price_change_pct">Supplier price change (%)</label>
-    <div style="display:flex;gap:.75rem;align-items:center;max-width:420px">
-      <input id="pct-slider" type="range"
-             min="{{ bounds_min }}" max="{{ bounds_max }}" step="1" value="5"
-             oninput="document.getElementById('supplier_price_change_pct').value = this.value;">
-      <input id="supplier_price_change_pct"
-             name="supplier_price_change_pct"
-             type="number" value="5" step="0.1"
-             min="{{ bounds_min }}" max="{{ bounds_max }}" style="width:6rem"
-             oninput="document.getElementById('pct-slider').value = this.value;">
-      <span class="muted">%</span>
-    </div>
-    <p class="muted">Allowed range {{ bounds_min }}% to {{ bounds_max }}%. Applied uniformly to every supplier; quantities and supplier mix are held constant.</p>
+    <label for="supplier_cost_change_pct">Supplier cost / COGS change (%)</label>
+    <input id="supplier_cost_change_pct" name="supplier_cost_change_pct"
+           type="number" value="12" step="0.1" min="0" max="30" required>
+    <label for="selling_price_change_pct">Selling price change (%)</label>
+    <input id="selling_price_change_pct" name="selling_price_change_pct"
+           type="number" value="0" step="0.1" min="-10" max="20" required>
+    <label for="volume_change_pct">Sales volume change (%)</label>
+    <input id="volume_change_pct" name="volume_change_pct"
+           type="number" value="0" step="0.1" min="-30" max="30" required>
+    <p class="muted">Volume scales revenue and COGS together. Selling price affects revenue; supplier cost affects COGS. Demand elasticity is not modeled.</p>
     <button type="submit" class="btn">Calculate</button>
   </form>
 </section>
@@ -117,7 +113,7 @@
     <thead>
       <tr>
         <th>Name</th>
-        <th>Baseline spend</th><th>Projected spend</th><th>Increase</th>
+        <th>Baseline gross profit</th><th>Scenario gross profit</th><th>Change</th>
         <th>Status</th><th></th>
       </tr>
     </thead>
@@ -125,21 +121,31 @@
     {% for s in scenarios %}
       <tr>
         <td>{{ s.name }}</td>
-        <td class="cell-num">{{ s.baseline_spend|money }}</td>
-        <td class="cell-num">{{ s.projected_spend|money }}</td>
-        <td class="cell-num">{{ s.increase|money }}</td>
+        <td class="cell-num">
+          {% if s.supported %}{{ s.currency }} {{ s.baseline_gross_profit|money }}{% else %}Unavailable{% endif %}
+        </td>
+        <td class="cell-num">
+          {% if s.supported %}{{ s.currency }} {{ s.scenario_gross_profit|money }}{% else %}Unavailable{% endif %}
+        </td>
+        <td class="cell-num">
+          {% if s.supported %}{{ s.currency }} {{ s.gross_profit_change|money }}{% else %}Unavailable{% endif %}
+        </td>
         <td>
-          {% if s.is_stale %}
+          {% if not s.supported %}
+            <span class="badge badge-warning">unsupported legacy scenario</span>
+          {% elif s.is_stale %}
             <span class="badge badge-danger">stale</span>
           {% else %}
             <span class="badge badge-success">{{ s.status }}</span>
           {% endif %}
         </td>
         <td>
-          <form method="post" action="/scenarios/{{ s.id }}/recalculate" style="display:inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn">Recalculate</button>
-          </form>
+          {% if s.supported %}
+            <form method="post" action="/scenarios/{{ s.id }}/recalculate" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn">Recalculate</button>
+            </form>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}

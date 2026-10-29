@@ -1,50 +1,26 @@
-# app/services/scenarios/engine.py
 """
-The Scenario Lab calculation engine.
+Deterministic procurement and gross-profit sensitivity calculations.
 
-Pure functions only. This module must never touch the database, the
-filesystem, the network, or an LLM. Same baseline + same assumptions
-always produce the same result. Callers (baseline.py, service.py) are
-responsible for loading and validating the data that goes in; the engine
-is responsible for arithmetic that can be unit-tested by hand.
-
-Scenario type: ``supplier_spend_sensitivity_v1``
-
-Question answered:
-    "If supplier prices rise by X%, how much would our purchase spend
-     increase, and which suppliers contribute most to that increase?"
-
-Model:
-    projected_spend = baseline_spend * (1 + price_change_pct / 100)
-
-Applied per supplier, then summed. Quantities and the purchasing mix are
-held constant by construction. This is a *sensitivity* estimate, not a
-forecast: it says what the existing purchasing pattern would cost at a
-different price level, not what will actually be bought next period.
-
-Money is Decimal. Percentages arrive as Decimal. No binary floats are
-used anywhere in this module; rounding happens once, at the end, through
-`quantize`.
+Pure functions only: no database, filesystem, network, or LLM access.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
-SCENARIO_TYPE = "supplier_spend_sensitivity_v1"
+SCENARIO_TYPE = "profit_sensitivity_v1"
 FORMULA_VERSION = 1
 
-# Two decimal places: the engine is currency-agnostic, and Sansa's staged
-# data carries money at (at most) this precision.
+SUPPLIER_COST_CHANGE_MIN = Decimal("0")
+SUPPLIER_COST_CHANGE_MAX = Decimal("30")
+SELLING_PRICE_CHANGE_MIN = Decimal("-10")
+SELLING_PRICE_CHANGE_MAX = Decimal("20")
+VOLUME_CHANGE_MIN = Decimal("-30")
+VOLUME_CHANGE_MAX = Decimal("30")
+
 _MONEY_QUANT = Decimal("0.01")
 _PCT_QUANT = Decimal("0.01")
-
-# Demo bounds from the release decision. These are policy, not physics:
-# they keep a demo from producing a 400% "what-if" that nobody asked for.
-# The service layer applies them; the engine only enforces what makes the
-# arithmetic undefined.
-SUPPLIER_PRICE_CHANGE_MIN = Decimal("-50")
-SUPPLIER_PRICE_CHANGE_MAX = Decimal("100")
 
 
 class ScenarioCalculationError(Exception):
@@ -52,40 +28,42 @@ class ScenarioCalculationError(Exception):
 
 
 @dataclass(frozen=True)
-class SupplierSpend:
-    """One supplier's baseline spend. `supplier_key` is a stable label."""
-    supplier_key: str
-    baseline_spend: Decimal
+class ProfitBaseline:
+    revenue: Decimal
+    cogs: Decimal
+    currency: str
 
 
 @dataclass(frozen=True)
-class SupplierProjection:
-    supplier_key: str
-    baseline_spend: Decimal
-    projected_spend: Decimal
-    increase: Decimal
-    share_of_total_increase_pct: Decimal | None
+class ProfitAssumptions:
+    supplier_cost_change_pct: Decimal
+    selling_price_change_pct: Decimal
+    volume_change_pct: Decimal
 
 
 @dataclass
-class SpendSensitivityResult:
+class ProfitSensitivityResult:
     scenario_type: str
     formula_version: int
-    price_change_pct: Decimal
-    baseline_spend: Decimal
-    projected_spend: Decimal
-    increase: Decimal
-    increase_pct: Decimal | None
-    suppliers: list[SupplierProjection] = field(default_factory=list)
+    currency: str
+    assumptions: ProfitAssumptions
+    baseline_revenue: Decimal
+    baseline_cogs: Decimal
+    baseline_gross_profit: Decimal
+    baseline_gross_margin_pct: Decimal | None
+    scenario_revenue: Decimal
+    scenario_cogs: Decimal
+    scenario_gross_profit: Decimal
+    scenario_gross_margin_pct: Decimal | None
+    gross_profit_change: Decimal
+    gross_profit_change_pct: Decimal | None
+    gross_margin_change_percentage_points: Decimal | None
+    explanation: str
     limitations: list[str] = field(default_factory=list)
 
 
-def _round_money(value: Decimal) -> Decimal:
-    return value.quantize(_MONEY_QUANT, rounding=ROUND_HALF_UP)
-
-
-def _round_pct(value: Decimal) -> Decimal:
-    return value.quantize(_PCT_QUANT, rounding=ROUND_HALF_UP)
+def _rounded(value: Decimal, quant: Decimal) -> Decimal:
+    return value.quantize(quant, rounding=ROUND_HALF_UP)
 
 
 def _require_finite(value: Decimal, field_name: str) -> None:
@@ -93,155 +71,138 @@ def _require_finite(value: Decimal, field_name: str) -> None:
         raise ScenarioCalculationError(f"{field_name} must be a finite number")
 
 
-def simulate_supplier_spend(
+def _validate_assumption(value: Decimal, *, name: str, minimum: Decimal, maximum: Decimal) -> None:
+    _require_finite(value, name)
+    if not minimum <= value <= maximum:
+        raise ScenarioCalculationError(f"{name} must be between {minimum} and {maximum} percent")
+
+
+def simulate_profit(
     *,
-    suppliers: list[SupplierSpend],
-    price_change_pct: Decimal,
-) -> SpendSensitivityResult:
+    baseline: ProfitBaseline,
+    assumptions: ProfitAssumptions,
+) -> ProfitSensitivityResult:
     """
-    Project purchase spend under a uniform supplier price change.
+    Calculate the gross-profit impact while holding the purchasing mix fixed.
 
-    Raises ScenarioCalculationError when the answer is undefined:
-      - non-finite or negative baseline spend
-      - non-finite price change, or a price change that would make the
-        price level zero or negative (i.e. <= -100%)
-      - no suppliers at all
-
-    An empty-but-valid baseline (everything zero) is allowed and yields
-    zero spend with a ``None`` percentage: 0 -> 0 has no meaningful rate.
+    Both revenue and COGS scale with volume. Selling price affects revenue;
+    supplier cost affects COGS. This is sensitivity analysis, not a forecast.
     """
-    _require_finite(price_change_pct, "price_change_pct")
-    if price_change_pct <= Decimal("-100"):
-        raise ScenarioCalculationError(
-            "price_change_pct must be greater than -100; a price level of "
-            "zero or below is not a meaningful scenario"
+    _require_finite(baseline.revenue, "baseline.revenue")
+    _require_finite(baseline.cogs, "baseline.cogs")
+    if baseline.revenue < 0:
+        raise ScenarioCalculationError("baseline revenue must be non-negative")
+    if baseline.cogs < 0:
+        raise ScenarioCalculationError("baseline COGS must be non-negative")
+    if not baseline.currency or baseline.currency != baseline.currency.strip():
+        raise ScenarioCalculationError("baseline currency must be a normalized code")
+
+    _validate_assumption(
+        assumptions.supplier_cost_change_pct,
+        name="supplier_cost_change_pct",
+        minimum=SUPPLIER_COST_CHANGE_MIN,
+        maximum=SUPPLIER_COST_CHANGE_MAX,
+    )
+    _validate_assumption(
+        assumptions.selling_price_change_pct,
+        name="selling_price_change_pct",
+        minimum=SELLING_PRICE_CHANGE_MIN,
+        maximum=SELLING_PRICE_CHANGE_MAX,
+    )
+    _validate_assumption(
+        assumptions.volume_change_pct,
+        name="volume_change_pct",
+        minimum=VOLUME_CHANGE_MIN,
+        maximum=VOLUME_CHANGE_MAX,
+    )
+
+    with localcontext() as context:
+        context.prec = 40
+        volume_factor = Decimal(1) + assumptions.volume_change_pct / Decimal(100)
+        revenue_factor = Decimal(1) + assumptions.selling_price_change_pct / Decimal(100)
+        cogs_factor = Decimal(1) + assumptions.supplier_cost_change_pct / Decimal(100)
+
+        baseline_revenue = _rounded(baseline.revenue, _MONEY_QUANT)
+        baseline_cogs = _rounded(baseline.cogs, _MONEY_QUANT)
+        baseline_profit = _rounded(baseline_revenue - baseline_cogs, _MONEY_QUANT)
+        scenario_revenue = _rounded(baseline.revenue * revenue_factor * volume_factor, _MONEY_QUANT)
+        scenario_cogs = _rounded(baseline.cogs * cogs_factor * volume_factor, _MONEY_QUANT)
+        scenario_profit = _rounded(scenario_revenue - scenario_cogs, _MONEY_QUANT)
+        profit_change = _rounded(scenario_profit - baseline_profit, _MONEY_QUANT)
+
+        baseline_margin = (
+            _rounded(baseline_profit / baseline_revenue * Decimal(100), _PCT_QUANT)
+            if baseline_revenue > 0
+            else None
         )
-    if not suppliers:
-        raise ScenarioCalculationError("baseline has no supplier spend to simulate")
-
-    # A wider precision context than the default 28 digits. Large ledgers
-    # with high-precision unit prices can exhaust the default when
-    # multiplied and summed; 40 keeps the intermediate totals exact.
-    with localcontext() as ctx:
-        ctx.prec = 40
-        multiplier = Decimal(1) + (price_change_pct / Decimal(100))
-
-        rows: list[SupplierProjection] = []
-        baseline_total = Decimal(0)
-        projected_total = Decimal(0)
-        for entry in suppliers:
-            _require_finite(entry.baseline_spend, "baseline_spend")
-            if entry.baseline_spend < 0:
-                raise ScenarioCalculationError(
-                    f"negative baseline spend for supplier "
-                    f"{entry.supplier_key!r}; spend must be non-negative"
-                )
-            projected = entry.baseline_spend * multiplier
-            baseline_total += entry.baseline_spend
-            projected_total += projected
-            rows.append(
-                SupplierProjection(
-                    supplier_key=entry.supplier_key,
-                    baseline_spend=entry.baseline_spend,
-                    projected_spend=projected,
-                    increase=projected - entry.baseline_spend,
-                    share_of_total_increase_pct=None,
-                )
-            )
-
-        total_increase = projected_total - baseline_total
-        increase_pct: Decimal | None
-        if baseline_total > 0:
-            increase_pct = _round_pct(
-                total_increase / baseline_total * Decimal(100)
-            )
-        else:
-            increase_pct = None
-
-        # Contribution only makes sense when something actually increases.
-        # A zero or negative total increase (price cut) has no ranking.
-        ranked: list[SupplierProjection] = []
-        for row in rows:
-            share: Decimal | None = None
-            if total_increase > 0:
-                share = _round_pct(row.increase / total_increase * Decimal(100))
-            ranked.append(
-                SupplierProjection(
-                    supplier_key=row.supplier_key,
-                    baseline_spend=_round_money(row.baseline_spend),
-                    projected_spend=_round_money(row.projected_spend),
-                    increase=_round_money(row.increase),
-                    share_of_total_increase_pct=share,
-                )
-            )
-        ranked.sort(
-            key=lambda r: (r.increase, r.baseline_spend, r.supplier_key),
-            reverse=True,
+        scenario_margin = (
+            _rounded(scenario_profit / scenario_revenue * Decimal(100), _PCT_QUANT)
+            if scenario_revenue > 0
+            else None
+        )
+        profit_change_pct = (
+            _rounded(profit_change / abs(baseline_profit) * Decimal(100), _PCT_QUANT)
+            if baseline_profit != 0
+            else None
+        )
+        margin_change = (
+            _rounded(scenario_margin - baseline_margin, _PCT_QUANT)
+            if scenario_margin is not None and baseline_margin is not None
+            else None
         )
 
-        return SpendSensitivityResult(
-            scenario_type=SCENARIO_TYPE,
-            formula_version=FORMULA_VERSION,
-            price_change_pct=_round_pct(price_change_pct),
-            baseline_spend=_round_money(baseline_total),
-            projected_spend=_round_money(projected_total),
-            increase=_round_money(total_increase),
-            increase_pct=increase_pct,
-            suppliers=ranked,
-            limitations=default_limitations(),
-        )
+    result = ProfitSensitivityResult(
+        scenario_type=SCENARIO_TYPE,
+        formula_version=FORMULA_VERSION,
+        currency=baseline.currency,
+        assumptions=assumptions,
+        baseline_revenue=baseline_revenue,
+        baseline_cogs=baseline_cogs,
+        baseline_gross_profit=baseline_profit,
+        baseline_gross_margin_pct=baseline_margin,
+        scenario_revenue=scenario_revenue,
+        scenario_cogs=scenario_cogs,
+        scenario_gross_profit=scenario_profit,
+        scenario_gross_margin_pct=scenario_margin,
+        gross_profit_change=profit_change,
+        gross_profit_change_pct=profit_change_pct,
+        gross_margin_change_percentage_points=margin_change,
+        explanation="",
+        limitations=default_limitations(),
+    )
+    result.explanation = explain_deterministically(result)
+    return result
 
 
 def default_limitations() -> list[str]:
-    """
-    The assumptions a reader must know to interpret the number honestly.
-    Kept in the result (not just the UI) so saved scenarios stay auditable.
-    """
     return [
-        "Purchase quantities and the supplier mix are held constant.",
-        "This is a sensitivity estimate, not a forecast of future spend.",
-        "Only suppliers with confirmed spend data are included.",
-        "Currency, taxes, discounts, and freight are not modeled separately.",
+        "Sales volume changes proportionally scale both revenue and COGS.",
+        "Selling-price changes affect revenue only; supplier-cost changes affect COGS only.",
+        "The purchasing mix and unit volumes are otherwise held constant.",
+        "This is deterministic sensitivity analysis, not a demand or profit forecast.",
+        "Demand elasticity, taxes, discounts, fixed costs, inventory constraints, and currency conversion are not modeled.",
     ]
 
 
-def _fmt_money(value: Decimal) -> str:
-    """Group thousands for the template sentence. Display only, no rounding."""
-    return f"{value:,.2f}"
-
-
-def explain_deterministically(result: SpendSensitivityResult) -> str:
-    """
-    A plain-language summary that is correct by construction.
-
-    The LLM explanation is optional and must never change the numbers;
-    this template is the fallback when no provider is configured, and it
-    is the only explanation shown for saved scenarios in v1.
-    """
-    if result.increase_pct is None:
-        return (
-            "The baseline spend is zero, so a percentage impact is undefined."
-        )
-    direction = "increase" if result.increase >= 0 else "decrease"
-    head = (
-        f"A {result.price_change_pct}% supplier price change would "
-        f"{direction} modeled purchase spend from "
-        f"{_fmt_money(result.baseline_spend)} to "
-        f"{_fmt_money(result.projected_spend)} "
-        f"({result.increase_pct:+}%)."
+def explain_deterministically(result: ProfitSensitivityResult) -> str:
+    """Render a concise explanation from calculated values without an LLM."""
+    change_label = "increase" if result.gross_profit_change >= 0 else "decrease"
+    text = (
+        f"Under the supplied assumptions, gross profit would {change_label} by "
+        f"{result.currency} {abs(result.gross_profit_change):,.2f}, from "
+        f"{result.currency} {result.baseline_gross_profit:,.2f} to "
+        f"{result.currency} {result.scenario_gross_profit:,.2f}."
     )
-    if not result.suppliers or result.increase <= 0:
-        return head
-    top = result.suppliers[0]
-    if len(result.suppliers) == 1:
-        return (
-            f"{head} {top.supplier_key} accounts for all of the change, "
-            f"because it is the only supplier in the baseline."
+    if result.baseline_gross_profit == 0:
+        text += " A percentage change is undefined because baseline gross profit is zero."
+    elif result.gross_profit_change_pct is not None:
+        text += f" That is a {result.gross_profit_change_pct:+}% change in gross profit."
+    if result.gross_margin_change_percentage_points is not None:
+        text += (
+            f" Gross margin moves from {result.baseline_gross_margin_pct}% to "
+            f"{result.scenario_gross_margin_pct}% "
+            f"({result.gross_margin_change_percentage_points:+} percentage points)."
         )
-    second = result.suppliers[1]
-    return (
-        f"{head} {top.supplier_key} contributes the most "
-        f"({_fmt_money(top.increase)}, {top.share_of_total_increase_pct}% of the "
-        f"increase), followed by {second.supplier_key} "
-        f"({_fmt_money(second.increase)}, {second.share_of_total_increase_pct}%)."
-    )
+    else:
+        text += " Gross margin is undefined because scenario revenue is zero."
+    return text

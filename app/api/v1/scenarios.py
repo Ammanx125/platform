@@ -12,6 +12,7 @@ Contract notes:
   - Missing prerequisites return 422 with a structured body naming the
     missing concept(s): the UI should explain, not just fail.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -27,6 +28,8 @@ from app.db.session import get_db
 from app.schemas.scenarios import (
     ScenarioCalculateRequest,
     ScenarioCapabilitiesRead,
+    ScenarioCompareRequest,
+    ScenarioCompareResponse,
     ScenarioPreviewResponse,
     ScenarioRead,
     ScenarioSaveRequest,
@@ -63,8 +66,8 @@ async def scenario_capabilities(
     _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> ScenarioCapabilitiesRead:
     """
-    Which sources can run the supplier-spend scenario, and why the others
-    cannot. Computed from confirmed mappings and staged rows only.
+    Which sources can support profit sensitivity, and why others cannot.
+    Computed from confirmed revenue, COGS, and currency mappings.
     """
     sources: list[SourceCapabilityRead] = await scenario_service.capabilities(
         db, tenant_id=tenant_id
@@ -72,9 +75,19 @@ async def scenario_capabilities(
     return ScenarioCapabilitiesRead(
         scenario_type=engine.SCENARIO_TYPE,
         formula_version=engine.FORMULA_VERSION,
-        price_change_bounds={
-            "min_pct": engine.SUPPLIER_PRICE_CHANGE_MIN,
-            "max_pct": engine.SUPPLIER_PRICE_CHANGE_MAX,
+        assumption_bounds={
+            "supplier_cost_change_pct": {
+                "min": engine.SUPPLIER_COST_CHANGE_MIN,
+                "max": engine.SUPPLIER_COST_CHANGE_MAX,
+            },
+            "selling_price_change_pct": {
+                "min": engine.SELLING_PRICE_CHANGE_MIN,
+                "max": engine.SELLING_PRICE_CHANGE_MAX,
+            },
+            "volume_change_pct": {
+                "min": engine.VOLUME_CHANGE_MIN,
+                "max": engine.VOLUME_CHANGE_MAX,
+            },
         },
         supported=any(s.supported for s in sources),
         sources=sources,
@@ -95,19 +108,25 @@ async def preview_scenario(
             db,
             tenant_id=tenant_id,
             source_id=body.source_id,
-            price_change_pct=body.assumptions.supplier_price_change_pct,
+            assumptions=engine.ProfitAssumptions(
+                supplier_cost_change_pct=body.assumptions.supplier_cost_change_pct,
+                selling_price_change_pct=body.assumptions.selling_price_change_pct,
+                volume_change_pct=body.assumptions.volume_change_pct,
+            ),
         )
     except BaselineUnavailable as exc:
         raise _baseline_error(exc) from exc
     except scenario_service.ScenarioServiceError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    provenance = dict(baseline.to_snapshot())
-    provenance["source_id"] = baseline.source_id
-    provenance["calculated_at"] = datetime.now(UTC).isoformat()
     return ScenarioPreviewResponse(
         result=scenario_service.result_read(result_document),
-        provenance=provenance,
+        provenance=scenario_service.provenance_read(
+            {
+                **baseline.to_snapshot(),
+                "calculated_at": datetime.now(UTC).isoformat(),
+            }
+        ),
         calculated_at=datetime.now(UTC),
     )
 
@@ -131,7 +150,11 @@ async def save_scenario(
             user_id=user.id,
             name=body.name,
             source_id=body.source_id,
-            price_change_pct=body.assumptions.supplier_price_change_pct,
+            assumptions=engine.ProfitAssumptions(
+                supplier_cost_change_pct=body.assumptions.supplier_cost_change_pct,
+                selling_price_change_pct=body.assumptions.selling_price_change_pct,
+                volume_change_pct=body.assumptions.volume_change_pct,
+            ),
         )
     except BaselineUnavailable as exc:
         raise _baseline_error(exc) from exc
@@ -151,10 +174,26 @@ async def list_scenarios(
 ) -> list[ScenarioSummaryRead]:
     if not 1 <= limit <= 200:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 200")
-    rows = await scenario_service.list_scenarios(
-        db, tenant_id=tenant_id, limit=limit
-    )
+    rows = await scenario_service.list_scenarios(db, tenant_id=tenant_id, limit=limit)
     return [scenario_service.to_summary(r) for r in rows]
+
+
+@router.post("/compare", response_model=ScenarioCompareResponse)
+async def compare_scenarios(
+    body: ScenarioCompareRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    tenant_id: CurrentTenantId,
+    _user: Annotated[User, Depends(require_permission("dataset:read"))],
+) -> ScenarioCompareResponse:
+    """Compare two or three saved scenarios for the same source/currency."""
+    try:
+        return await scenario_service.compare_scenarios(
+            db, tenant_id=tenant_id, scenario_ids=body.scenario_ids
+        )
+    except scenario_service.ScenarioNotFound as exc:
+        raise HTTPException(status_code=404, detail="scenario not found") from exc
+    except scenario_service.ScenarioServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/{scenario_id}", response_model=ScenarioRead)
@@ -165,9 +204,7 @@ async def get_scenario(
     _user: Annotated[User, Depends(require_permission("dataset:read"))],
 ) -> ScenarioRead:
     try:
-        scenario = await scenario_service.get(
-            db, tenant_id=tenant_id, scenario_id=scenario_id
-        )
+        scenario = await scenario_service.get(db, tenant_id=tenant_id, scenario_id=scenario_id)
     except scenario_service.ScenarioNotFound as exc:
         # 404 for another tenant's scenario too: never confirm it exists.
         raise HTTPException(status_code=404, detail="scenario not found") from exc

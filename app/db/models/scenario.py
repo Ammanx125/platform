@@ -22,7 +22,7 @@ class WhatIfScenario(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     silently different ones. ``baseline_snapshot`` and ``result`` are the
     calculation-time record; ``provenance`` is what makes those numbers
     reproducible and auditable (source, snapshot mode, ingestion jobs,
-    confirmed columns, skipped rows).
+    confirmed revenue/COGS/currency columns, and row coverage).
 
     Status:
       - 'calculated'  - saved together with a successful calculation
@@ -30,9 +30,9 @@ class WhatIfScenario(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
                         stored numbers are untouched; recalculating is an
                         explicit user action.
 
-    Deliberately NOT stored: the raw business rows. Only the totals,
-    supplier breakdown, and the evidence references needed to redo the
-    calculation live here.
+    Deliberately NOT stored: the raw business rows. Only the validated
+    assumptions, calculated profit metrics, frozen baseline, and evidence
+    references needed to audit or redo the calculation live here.
     """
 
     __tablename__ = "whatif_scenarios"

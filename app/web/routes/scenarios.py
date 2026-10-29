@@ -17,16 +17,18 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_permission
 from app.core.config import settings
 from app.db.session import get_db
+from app.schemas.scenarios import ProfitAssumptions
 from app.services.scenarios import engine
 from app.services.scenarios import service as scenario_service
 from app.services.scenarios.baseline import BaselineUnavailable
 from app.web.deps import HtmlUser
-from app.web.templating import templates
+from app.web.templating import base_context, templates
 
 router = APIRouter()
 
@@ -78,8 +80,6 @@ async def _page_context(db: AsyncSession, *, tenant_id: uuid.UUID) -> dict[str, 
         "capabilities": capabilities,
         "selected_source": next((c for c in capabilities if c.supported), None),
         "scenarios": [scenario_service.to_summary(s) for s in scenarios],
-        "bounds_min": engine.SUPPLIER_PRICE_CHANGE_MIN,
-        "bounds_max": engine.SUPPLIER_PRICE_CHANGE_MAX,
         "limitations": engine.default_limitations(),
     }
 
@@ -94,6 +94,11 @@ async def scenarios_page(
     context.update(
         request=request,
         user=user,
+        **base_context(),
+        loop_stage="scenarios",
+        active_nav="scenarios",
+        tenant_name=str(user.tenant_id),
+        user_email=user.email,
         preview=None,
         error=None,
         form={},
@@ -108,7 +113,9 @@ async def scenarios_preview(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: HtmlUser,
     source_id: Annotated[str, Form()],
-    supplier_price_change_pct: Annotated[str, Form()],
+    supplier_cost_change_pct: Annotated[str, Form()],
+    selling_price_change_pct: Annotated[str, Form()],
+    volume_change_pct: Annotated[str, Form()],
 ) -> HTMLResponse:
     """
     HTMX target. Returns just the result fragment. A bad input renders an
@@ -118,21 +125,21 @@ async def scenarios_preview(
     missing: list[str] = []
     preview = None
     try:
-        percent = Decimal(supplier_price_change_pct)
-        if not percent.is_finite():
-            raise InvalidOperation
-    except (InvalidOperation, ValueError):
-        percent = None
-
-    if percent is None:
-        error = "Enter a number for the supplier price change."
-    elif not (engine.SUPPLIER_PRICE_CHANGE_MIN <= percent <= engine.SUPPLIER_PRICE_CHANGE_MAX):
-        error = (
-            f"Supplier price change must be between "
-            f"{engine.SUPPLIER_PRICE_CHANGE_MIN}% and "
-            f"{engine.SUPPLIER_PRICE_CHANGE_MAX}%."
+        assumptions = ProfitAssumptions(
+            supplier_cost_change_pct=Decimal(supplier_cost_change_pct),
+            selling_price_change_pct=Decimal(selling_price_change_pct),
+            volume_change_pct=Decimal(volume_change_pct),
         )
-    else:
+    except ValidationError as exc:
+        assumptions = None
+        error = str(exc)
+    except (InvalidOperation, ValueError):
+        assumptions = None
+        error = "Enter valid finite numbers for all three assumptions."
+
+    if assumptions is None and error is None:
+        error = "Enter valid values for all three assumptions."
+    elif assumptions is not None:
         try:
             parsed_source_id = uuid.UUID(source_id)
         except ValueError:
@@ -143,7 +150,11 @@ async def scenarios_preview(
                     db,
                     tenant_id=user.tenant_id,
                     source_id=parsed_source_id,
-                    price_change_pct=percent,
+                    assumptions=engine.ProfitAssumptions(
+                        supplier_cost_change_pct=assumptions.supplier_cost_change_pct,
+                        selling_price_change_pct=assumptions.selling_price_change_pct,
+                        volume_change_pct=assumptions.volume_change_pct,
+                    ),
                 )
             except BaselineUnavailable as exc:
                 error = exc.detail
@@ -168,7 +179,9 @@ async def scenarios_preview(
             "csrf_token": request.cookies.get(settings.csrf_cookie_name, ""),
             "form": {
                 "source_id": source_id,
-                "supplier_price_change_pct": supplier_price_change_pct,
+                "supplier_cost_change_pct": supplier_cost_change_pct,
+                "selling_price_change_pct": selling_price_change_pct,
+                "volume_change_pct": volume_change_pct,
             },
         },
     )
@@ -186,28 +199,27 @@ async def scenarios_save(
     user: HtmlUser,
     name: Annotated[str, Form()],
     source_id: Annotated[str, Form()],
-    supplier_price_change_pct: Annotated[str, Form()],
+    supplier_cost_change_pct: Annotated[str, Form()],
+    selling_price_change_pct: Annotated[str, Form()],
+    volume_change_pct: Annotated[str, Form()],
 ) -> RedirectResponse:
     """Save round-trip: persists then redirects back to the list."""
     try:
-        percent = Decimal(supplier_price_change_pct)
+        assumptions = ProfitAssumptions(
+            supplier_cost_change_pct=Decimal(supplier_cost_change_pct),
+            selling_price_change_pct=Decimal(selling_price_change_pct),
+            volume_change_pct=Decimal(volume_change_pct),
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
     except (InvalidOperation, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Enter a valid supplier price change.",
+            detail="Enter valid finite values for all three assumptions.",
         ) from exc
-
-    if not percent.is_finite() or not (
-        engine.SUPPLIER_PRICE_CHANGE_MIN <= percent <= engine.SUPPLIER_PRICE_CHANGE_MAX
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                f"Supplier price change must be between "
-                f"{engine.SUPPLIER_PRICE_CHANGE_MIN}% and "
-                f"{engine.SUPPLIER_PRICE_CHANGE_MAX}%."
-            ),
-        )
 
     try:
         parsed_source_id = uuid.UUID(source_id)
@@ -224,7 +236,11 @@ async def scenarios_save(
             user_id=user.id,
             name=name.strip() or "Untitled scenario",
             source_id=parsed_source_id,
-            price_change_pct=percent,
+            assumptions=engine.ProfitAssumptions(
+                supplier_cost_change_pct=assumptions.supplier_cost_change_pct,
+                selling_price_change_pct=assumptions.selling_price_change_pct,
+                volume_change_pct=assumptions.volume_change_pct,
+            ),
         )
     except BaselineUnavailable:
         # The preview already explained the failure; a stale form submit

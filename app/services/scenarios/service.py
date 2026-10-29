@@ -1,15 +1,10 @@
-# app/services/scenarios/service.py
 """
-Scenario Lab orchestration.
+Scenario Lab orchestration and persistence.
 
-This layer owns tenancy, persistence, staleness, and the translation
-between the pure engine's dataclasses and the stored JSONB documents.
-It does not own arithmetic: every number comes from engine.py.
-
-Read-only guarantee: nothing in this module writes to StagedRow,
-IngestionJob, DataSource, or any other source table. Saving a scenario
-touches exactly one table, whatif_scenarios.
+The service owns tenant-scoped data resolution, durable snapshots,
+staleness, and API serialization. Numerical calculations stay in engine.py.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -22,26 +17,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.scenario import WhatIfScenario
 from app.schemas.scenarios import (
+    ProfitMetricsRead,
+    ScenarioCompareResponse,
+    ScenarioDeltaRead,
+    ScenarioProvenanceRead,
     ScenarioRead,
     ScenarioResultRead,
     ScenarioSummaryRead,
     SourceCapabilityRead,
-    SpendTotalsRead,
-    SupplierProjectionRead,
 )
 from app.services.audit import service as audit_service
+from app.services.audit import types as audit_types
 from app.services.scenarios import engine
 from app.services.scenarios.baseline import (
     BaselineUnavailable,
-    SupplierBaseline,
+    ProfitBaseline,
     is_baseline_current,
     list_candidate_sources,
-    resolve_supplier_baseline,
+    resolve_profit_baseline,
 )
 
-SCENARIO_TYPES = (engine.SCENARIO_TYPE,)
-
-# Permission keys used by the API/web layers. Kept here so both agree.
 PERMISSION_READ = "dataset:read"
 PERMISSION_WRITE = "dataset:write"
 
@@ -54,61 +49,58 @@ class ScenarioNotFound(ScenarioServiceError):
     pass
 
 
-# ---------- calculation ----------
-
-
 def _result_document(
-    *,
-    result: engine.SpendSensitivityResult,
-    provenance: SupplierBaseline,
+    result: engine.ProfitSensitivityResult,
 ) -> dict[str, Any]:
-    """
-    The JSONB shape stored in ``whatif_scenarios.result`` and returned to
-    callers. Values are strings (Decimal-safe) and the formula version is
-    embedded so an old scenario still renders after a v2 formula ships.
-    """
+    """JSONB-safe result shape, with Decimal values stored as strings."""
     return {
         "scenario_type": result.scenario_type,
         "formula_version": result.formula_version,
-        "price_change_pct": str(result.price_change_pct),
-        # The baseline block reports the *before* state on its own terms:
-        # baseline == projected and there is no delta to show.
-        "baseline": {
-            "baseline_spend": str(result.baseline_spend),
-            "projected_spend": str(result.baseline_spend),
-            "increase": "0",
-            "increase_pct": "0",
+        "currency": result.currency,
+        "assumptions": {
+            "supplier_cost_change_pct": str(result.assumptions.supplier_cost_change_pct),
+            "selling_price_change_pct": str(result.assumptions.selling_price_change_pct),
+            "volume_change_pct": str(result.assumptions.volume_change_pct),
         },
-        "scenario": {
-            "baseline_spend": str(result.baseline_spend),
-            "projected_spend": str(result.projected_spend),
-            "increase": str(result.increase),
-            "increase_pct": (
-                str(result.increase_pct) if result.increase_pct is not None else None
+        "baseline": {
+            "revenue": str(result.baseline_revenue),
+            "cogs": str(result.baseline_cogs),
+            "gross_profit": str(result.baseline_gross_profit),
+            "gross_margin_pct": (
+                str(result.baseline_gross_margin_pct)
+                if result.baseline_gross_margin_pct is not None
+                else None
             ),
         },
-        "suppliers": [
-            {
-                "supplier_key": s.supplier_key,
-                "baseline_spend": str(s.baseline_spend),
-                "projected_spend": str(s.projected_spend),
-                "increase": str(s.increase),
-                "share_of_total_increase_pct": (
-                    str(s.share_of_total_increase_pct)
-                    if s.share_of_total_increase_pct is not None
-                    else None
-                ),
-            }
-            for s in result.suppliers
-        ],
-        "explanation": engine.explain_deterministically(result),
+        "scenario": {
+            "revenue": str(result.scenario_revenue),
+            "cogs": str(result.scenario_cogs),
+            "gross_profit": str(result.scenario_gross_profit),
+            "gross_margin_pct": (
+                str(result.scenario_gross_margin_pct)
+                if result.scenario_gross_margin_pct is not None
+                else None
+            ),
+        },
+        "delta": {
+            "gross_profit": str(result.gross_profit_change),
+            "gross_profit_pct": (
+                str(result.gross_profit_change_pct)
+                if result.gross_profit_change_pct is not None
+                else None
+            ),
+            "gross_margin_percentage_points": (
+                str(result.gross_margin_change_percentage_points)
+                if result.gross_margin_change_percentage_points is not None
+                else None
+            ),
+        },
+        "explanation": result.explanation,
         "limitations": list(result.limitations),
-        "source_name": provenance.source_name,
-        "spend_shape": provenance.spend_shape,
     }
 
 
-def _provenance_document(baseline: SupplierBaseline) -> dict[str, Any]:
+def _provenance_document(baseline: ProfitBaseline) -> dict[str, Any]:
     snapshot = baseline.to_snapshot()
     snapshot["calculated_at"] = datetime.now(UTC).isoformat()
     return snapshot
@@ -119,50 +111,45 @@ async def calculate(
     *,
     tenant_id: uuid.UUID,
     source_id: uuid.UUID,
-    price_change_pct: Decimal,
-) -> tuple[dict[str, Any], SupplierBaseline, engine.SpendSensitivityResult]:
-    """
-    Resolve the baseline and run the engine. Returns the result document,
-    the baseline (for provenance) and the engine result (for the
-    deterministic explanation).
-    """
-    baseline = await resolve_supplier_baseline(
-        db, tenant_id=tenant_id, source_id=source_id
-    )
+    assumptions: engine.ProfitAssumptions,
+) -> tuple[dict[str, Any], ProfitBaseline, engine.ProfitSensitivityResult]:
+    baseline = await resolve_profit_baseline(db, tenant_id=tenant_id, source_id=source_id)
     try:
-        result = engine.simulate_supplier_spend(
-            suppliers=baseline.suppliers,
-            price_change_pct=price_change_pct,
+        result = engine.simulate_profit(
+            baseline=engine.ProfitBaseline(
+                revenue=baseline.revenue,
+                cogs=baseline.cogs,
+                currency=baseline.currency,
+            ),
+            assumptions=assumptions,
         )
     except engine.ScenarioCalculationError as exc:
         raise ScenarioServiceError(str(exc)) from exc
-    return _result_document(result=result, provenance=baseline), baseline, result
+    return _result_document(result), baseline, result
 
 
-# ---------- capabilities ----------
+def _assumptions_from_scenario(scenario: WhatIfScenario) -> engine.ProfitAssumptions:
+    try:
+        values = scenario.assumptions
+        return engine.ProfitAssumptions(
+            supplier_cost_change_pct=Decimal(str(values["supplier_cost_change_pct"])),
+            selling_price_change_pct=Decimal(str(values["selling_price_change_pct"])),
+            volume_change_pct=Decimal(str(values["volume_change_pct"])),
+        )
+    except (KeyError, TypeError, ArithmeticError, ValueError) as exc:
+        raise ScenarioServiceError(
+            "saved scenario has unreadable assumptions; save a new scenario"
+        ) from exc
 
 
-async def capabilities(
-    db: AsyncSession, *, tenant_id: uuid.UUID
-) -> list[SourceCapabilityRead]:
-    """
-    Report, per active source, whether the supplier-spend scenario can run
-    and exactly what is missing when it cannot. This is what lets the UI
-    explain instead of failing.
-
-    Resolving a baseline reads staged rows, so this is bounded to the
-    tenant's active sources and is intended for the Scenario Lab page, not
-    for high-frequency polling.
-    """
+async def capabilities(db: AsyncSession, *, tenant_id: uuid.UUID) -> list[SourceCapabilityRead]:
     sources = await list_candidate_sources(db, tenant_id=tenant_id)
-    capabilities: list[SourceCapabilityRead] = []
+    output: list[SourceCapabilityRead] = []
     for source in sources:
         try:
-            baseline = await resolve_supplier_baseline(
-                db, tenant_id=tenant_id, source_id=source.id
-            )
+            baseline = await resolve_profit_baseline(db, tenant_id=tenant_id, source_id=source.id)
         except BaselineUnavailable as exc:
-            capabilities.append(
+            output.append(
                 SourceCapabilityRead(
                     source_id=source.id,
                     source_name=source.name,
@@ -171,32 +158,31 @@ async def capabilities(
                     supported=False,
                     code=exc.code,
                     detail=exc.detail,
-                    missing_concepts=list(exc.missing),
+                    missing_concepts=exc.missing,
                 )
             )
             continue
-        capabilities.append(
+        output.append(
             SourceCapabilityRead(
-                source_id=source.id,
-                source_name=source.name,
+                source_id=baseline.source_id,
+                source_name=baseline.source_name,
                 source_type=source.source_type,
                 snapshot_mode=baseline.snapshot_mode,
                 supported=True,
                 code="ready",
                 detail=(
-                    f"{len(baseline.suppliers)} suppliers, "
-                    f"{baseline.rows_considered - baseline.rows_skipped} usable rows"
+                    f"{baseline.currency} {baseline.revenue:,.2f} revenue, "
+                    f"{baseline.currency} {baseline.cogs:,.2f} COGS from "
+                    f"{baseline.rows_considered} complete rows"
                 ),
-                supplier_count=len(baseline.suppliers),
-                total_spend=baseline.total_spend,
+                currency=baseline.currency,
+                revenue=baseline.revenue,
+                cogs=baseline.cogs,
                 rows_considered=baseline.rows_considered,
-                rows_skipped=baseline.rows_skipped,
+                rows_skipped=0,
             )
         )
-    return capabilities
-
-
-# ---------- persistence ----------
+    return output
 
 
 async def save(
@@ -206,10 +192,13 @@ async def save(
     user_id: uuid.UUID | None,
     name: str,
     source_id: uuid.UUID,
-    price_change_pct: Decimal,
+    assumptions: engine.ProfitAssumptions,
 ) -> WhatIfScenario:
     result_document, baseline, _result = await calculate(
-        db, tenant_id=tenant_id, source_id=source_id, price_change_pct=price_change_pct
+        db,
+        tenant_id=tenant_id,
+        source_id=source_id,
+        assumptions=assumptions,
     )
     scenario = WhatIfScenario(
         tenant_id=tenant_id,
@@ -219,7 +208,9 @@ async def save(
         source_id=baseline.source_id,
         status="calculated",
         assumptions={
-            "supplier_price_change_pct": str(price_change_pct),
+            "supplier_cost_change_pct": str(assumptions.supplier_cost_change_pct),
+            "selling_price_change_pct": str(assumptions.selling_price_change_pct),
+            "volume_change_pct": str(assumptions.volume_change_pct),
         },
         baseline_snapshot=baseline.to_snapshot(),
         result=result_document,
@@ -230,23 +221,21 @@ async def save(
     await audit_service.emit(
         db,
         tenant_id=tenant_id,
-        event_type="scenario.saved",
+        event_type=audit_types.SCENARIO_SAVED,
         actor_user_id=user_id,
         subject_type="whatif_scenario",
         subject_id=scenario.id,
         metadata={
             "scenario_type": scenario.scenario_type,
             "source_id": str(scenario.source_id),
-            "price_change_pct": str(price_change_pct),
+            "assumptions": scenario.assumptions,
         },
-        message=f"what-if scenario {name!r} saved",
+        message=f"profit scenario {name!r} saved",
     )
     return scenario
 
 
-async def get(
-    db: AsyncSession, *, tenant_id: uuid.UUID, scenario_id: uuid.UUID
-) -> WhatIfScenario:
+async def get(db: AsyncSession, *, tenant_id: uuid.UUID, scenario_id: uuid.UUID) -> WhatIfScenario:
     scenario = (
         await db.execute(
             select(WhatIfScenario).where(
@@ -263,13 +252,37 @@ async def get(
 async def list_scenarios(
     db: AsyncSession, *, tenant_id: uuid.UUID, limit: int = 100
 ) -> list[WhatIfScenario]:
-    stmt = (
+    statement = (
         select(WhatIfScenario)
         .where(WhatIfScenario.tenant_id == tenant_id)
         .order_by(WhatIfScenario.created_at.desc())
         .limit(limit)
     )
-    return list((await db.execute(stmt)).scalars().all())
+    return list((await db.execute(statement)).scalars().all())
+
+
+async def compare_scenarios(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    scenario_ids: list[uuid.UUID],
+) -> ScenarioCompareResponse:
+    scenarios = [
+        await get(db, tenant_id=tenant_id, scenario_id=scenario_id) for scenario_id in scenario_ids
+    ]
+    if any(not to_read(scenario).supported for scenario in scenarios):
+        raise ScenarioServiceError("only scenarios in the current profit format can be compared")
+    source_ids = {scenario.source_id for scenario in scenarios}
+    currencies = {str((scenario.result or {}).get("currency", "")) for scenario in scenarios}
+    if len(source_ids) != 1:
+        raise ScenarioServiceError("scenarios must use the same source to be compared")
+    if len(currencies) != 1 or "" in currencies:
+        raise ScenarioServiceError("scenarios must use the same known currency to be compared")
+    return ScenarioCompareResponse(
+        source_id=next(iter(source_ids)),
+        currency=next(iter(currencies)),
+        scenarios=[to_read(scenario) for scenario in scenarios],
+    )
 
 
 async def recalculate(
@@ -279,28 +292,14 @@ async def recalculate(
     scenario_id: uuid.UUID,
     user_id: uuid.UUID | None,
 ) -> WhatIfScenario:
-    """
-    Re-run a saved scenario against the source's *current* baseline.
-
-    The assumptions are reused verbatim. The previous result is replaced
-    only after a successful calculation; if the source can no longer
-    support the scenario, the stored numbers stay and ``stale_reason``
-    explains why recalculating did not happen.
-    """
     scenario = await get(db, tenant_id=tenant_id, scenario_id=scenario_id)
-    try:
-        price_change = Decimal(str(scenario.assumptions["supplier_price_change_pct"]))
-    except (KeyError, TypeError, ArithmeticError) as exc:
-        raise ScenarioServiceError(
-            "saved scenario has unreadable assumptions; save a new one"
-        ) from exc
-
+    assumptions = _assumptions_from_scenario(scenario)
     try:
         result_document, baseline, _result = await calculate(
             db,
             tenant_id=tenant_id,
             source_id=scenario.source_id,
-            price_change_pct=price_change,
+            assumptions=assumptions,
         )
     except BaselineUnavailable as exc:
         scenario.status = "stale"
@@ -317,72 +316,51 @@ async def recalculate(
     await audit_service.emit(
         db,
         tenant_id=tenant_id,
-        event_type="scenario.recalculated",
+        event_type=audit_types.SCENARIO_RECALCULATED,
         actor_user_id=user_id,
         subject_type="whatif_scenario",
         subject_id=scenario.id,
         metadata={
             "source_id": str(scenario.source_id),
-            "ingestion_job_ids": [str(j) for j in baseline.ingestion_job_ids],
+            "ingestion_job_ids": [str(job_id) for job_id in baseline.ingestion_job_ids],
         },
-        message=f"what-if scenario {scenario.name!r} recalculated",
+        message=f"profit scenario {scenario.name!r} recalculated",
     )
     return scenario
 
 
-# ---------- staleness ----------
-
-
-async def mark_stale_scenarios(
-    db: AsyncSession, *, tenant_id: uuid.UUID
-) -> int:
-    """
-    Flag saved scenarios whose baseline is no longer current.
-
-    A scenario goes stale when the set of ingestion jobs its baseline came
-    from differs from what the source would produce now. This only changes
-    ``status``/``stale_reason``; the stored numbers are never rewritten.
-
-    Idempotent: already-stale scenarios with the same reason are skipped.
-    Returns the number of rows updated.
-    """
+async def mark_stale_scenarios(db: AsyncSession, *, tenant_id: uuid.UUID) -> int:
     scenarios = (
-        await db.execute(
-            select(WhatIfScenario).where(
-                WhatIfScenario.tenant_id == tenant_id,
-                WhatIfScenario.status == "calculated",
+        (
+            await db.execute(
+                select(WhatIfScenario).where(
+                    WhatIfScenario.tenant_id == tenant_id,
+                    WhatIfScenario.status == "calculated",
+                )
             )
         )
-    ).scalars().all()
-
-    current_by_source: dict[uuid.UUID, list[str] | None] = {}
+        .scalars()
+        .all()
+    )
+    current_by_source: dict[uuid.UUID, dict[str, Any] | None] = {}
     updated = 0
     for scenario in scenarios:
         if scenario.source_id not in current_by_source:
             try:
-                baseline = await resolve_supplier_baseline(
+                baseline = await resolve_profit_baseline(
                     db, tenant_id=tenant_id, source_id=scenario.source_id
                 )
-                current_by_source[scenario.source_id] = [
-                    str(j) for j in baseline.ingestion_job_ids
-                ]
+                current_by_source[scenario.source_id] = baseline.to_snapshot()
             except BaselineUnavailable:
                 current_by_source[scenario.source_id] = None
-
         current = current_by_source[scenario.source_id]
-        saved = list((scenario.baseline_snapshot or {}).get("ingestion_job_ids") or [])
-        if current is None:
+        saved = scenario.baseline_snapshot or {}
+        if current is None or not is_baseline_current(
+            saved_snapshot=saved, current_snapshot=current
+        ):
             scenario.status = "stale"
             scenario.stale_reason = (
-                "the source no longer supports this scenario; recalculate to "
-                "see why"
-            )
-            updated += 1
-        elif not is_baseline_current(saved_job_ids=saved, current_job_ids=current):
-            scenario.status = "stale"
-            scenario.stale_reason = (
-                "the source's ingested data has changed since this scenario "
-                "was calculated"
+                "source data changed or no longer supports a verified profit baseline"
             )
             updated += 1
     if updated:
@@ -390,78 +368,97 @@ async def mark_stale_scenarios(
     return updated
 
 
-# ---------- serialization ----------
-
-
-def _totals(document: dict[str, Any]) -> SpendTotalsRead:
-    return SpendTotalsRead(
-        baseline_spend=Decimal(str(document["baseline_spend"])),
-        projected_spend=Decimal(str(document["projected_spend"])),
-        increase=Decimal(str(document["increase"])),
-        increase_pct=(
-            Decimal(str(document["increase_pct"]))
-            if document.get("increase_pct") is not None
-            else None
-        ),
-    )
+def _decimal_or_none(value: Any) -> Decimal | None:
+    return Decimal(str(value)) if value is not None else None
 
 
 def result_read(document: dict[str, Any]) -> ScenarioResultRead:
+    baseline = document["baseline"]
+    scenario = document["scenario"]
+    delta = document["delta"]
+    assumptions = document["assumptions"]
     return ScenarioResultRead(
         scenario_type=document["scenario_type"],
         formula_version=int(document["formula_version"]),
-        price_change_pct=Decimal(str(document["price_change_pct"])),
-        baseline=_totals(document["baseline"]),
-        scenario=_totals(document["scenario"]),
-        suppliers=[
-            SupplierProjectionRead(
-                supplier_key=s["supplier_key"],
-                baseline_spend=Decimal(str(s["baseline_spend"])),
-                projected_spend=Decimal(str(s["projected_spend"])),
-                increase=Decimal(str(s["increase"])),
-                share_of_total_increase_pct=(
-                    Decimal(str(s["share_of_total_increase_pct"]))
-                    if s.get("share_of_total_increase_pct") is not None
-                    else None
-                ),
-            )
-            for s in document.get("suppliers", [])
-        ],
-        explanation=document.get("explanation", ""),
-        limitations=list(document.get("limitations", [])),
+        currency=document["currency"],
+        assumptions=assumptions,
+        baseline=ProfitMetricsRead(
+            revenue=Decimal(str(baseline["revenue"])),
+            cogs=Decimal(str(baseline["cogs"])),
+            gross_profit=Decimal(str(baseline["gross_profit"])),
+            gross_margin_pct=_decimal_or_none(baseline.get("gross_margin_pct")),
+        ),
+        scenario=ProfitMetricsRead(
+            revenue=Decimal(str(scenario["revenue"])),
+            cogs=Decimal(str(scenario["cogs"])),
+            gross_profit=Decimal(str(scenario["gross_profit"])),
+            gross_margin_pct=_decimal_or_none(scenario.get("gross_margin_pct")),
+        ),
+        delta=ScenarioDeltaRead(
+            gross_profit=Decimal(str(delta["gross_profit"])),
+            gross_profit_pct=_decimal_or_none(delta.get("gross_profit_pct")),
+            gross_margin_percentage_points=_decimal_or_none(
+                delta.get("gross_margin_percentage_points")
+            ),
+        ),
+        explanation=document["explanation"],
+        limitations=list(document["limitations"]),
     )
 
 
+def provenance_read(document: dict[str, Any]) -> ScenarioProvenanceRead:
+    return ScenarioProvenanceRead.model_validate(document)
+
+
 def to_read(scenario: WhatIfScenario) -> ScenarioRead:
-    provenance = scenario.provenance or {}
+    result: ScenarioResultRead | None = None
+    provenance: ScenarioProvenanceRead | None = None
+    supported = scenario.scenario_type == engine.SCENARIO_TYPE
+    if supported:
+        try:
+            result = result_read(scenario.result or {})
+            provenance = provenance_read(scenario.provenance or {})
+        except (ArithmeticError, KeyError, TypeError, ValueError):
+            supported = False
+
     return ScenarioRead(
         id=scenario.id,
         name=scenario.name,
         scenario_type=scenario.scenario_type,
         source_id=scenario.source_id,
-        status=scenario.status,
+        status=scenario.status if supported else "unsupported",
         assumptions=scenario.assumptions or {},
-        result=result_read(scenario.result),
+        result=result,
         provenance=provenance,
         is_stale=scenario.status == "stale",
         stale_reason=scenario.stale_reason,
         created_by_user_id=scenario.created_by_user_id,
         created_at=scenario.created_at,
         updated_at=scenario.updated_at,
+        supported=supported,
+        compatibility_note=(
+            None
+            if supported
+            else "This saved scenario uses an unsupported format. Its historical "
+            "values are preserved but cannot be represented as profit metrics."
+        ),
     )
 
 
 def to_summary(scenario: WhatIfScenario) -> ScenarioSummaryRead:
-    scenario_doc = (scenario.result or {}).get("scenario", {})
+    detail = to_read(scenario)
+    result = detail.result
     return ScenarioSummaryRead(
         id=scenario.id,
         name=scenario.name,
         scenario_type=scenario.scenario_type,
         source_id=scenario.source_id,
-        status=scenario.status,
-        baseline_spend=Decimal(str(scenario_doc.get("baseline_spend", "0"))),
-        projected_spend=Decimal(str(scenario_doc.get("projected_spend", "0"))),
-        increase=Decimal(str(scenario_doc.get("increase", "0"))),
+        status=detail.status,
+        currency=result.currency if result is not None else None,
+        baseline_gross_profit=(result.baseline.gross_profit if result is not None else None),
+        scenario_gross_profit=(result.scenario.gross_profit if result is not None else None),
+        gross_profit_change=(result.delta.gross_profit if result is not None else None),
         is_stale=scenario.status == "stale",
         created_at=scenario.created_at,
+        supported=detail.supported,
     )

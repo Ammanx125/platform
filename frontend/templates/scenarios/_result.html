@@ -20,80 +20,58 @@
   </thead>
   <tbody>
     <tr>
-      <td>Supplier price change</td>
-      <td class="cell-num">0%</td>
-      <td class="cell-num">{{ r.price_change_pct }}%</td>
-      <td></td>
+      <td>Revenue</td>
+      <td class="cell-num">{{ r.currency }} {{ r.baseline.revenue|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ r.scenario.revenue|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ (r.scenario.revenue - r.baseline.revenue)|money }}</td>
     </tr>
     <tr>
-      <td>Purchase spend</td>
-      <td class="cell-num">{{ r.baseline.projected_spend|money }}</td>
-      <td class="cell-num">{{ r.scenario.projected_spend|money }}</td>
+      <td>COGS</td>
+      <td class="cell-num">{{ r.currency }} {{ r.baseline.cogs|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ r.scenario.cogs|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ (r.scenario.cogs - r.baseline.cogs)|money }}</td>
+    </tr>
+    <tr>
+      <td>Gross profit</td>
+      <td class="cell-num">{{ r.currency }} {{ r.baseline.gross_profit|money }}</td>
+      <td class="cell-num">{{ r.currency }} {{ r.scenario.gross_profit|money }}</td>
       <td class="cell-num">
-        {{ r.scenario.increase|money }}
-        ({{ r.scenario.increase_pct|pct }})
+        {{ r.currency }} {{ r.delta.gross_profit|money }}
+        {% if r.delta.gross_profit_pct is not none %}({{ r.delta.gross_profit_pct|pct }}){% endif %}
+      </td>
+    </tr>
+    <tr>
+      <td>Gross margin</td>
+      <td class="cell-num">{{ r.baseline.gross_margin_pct|pct }}</td>
+      <td class="cell-num">{{ r.scenario.gross_margin_pct|pct }}</td>
+      <td class="cell-num">
+        {% if r.delta.gross_margin_percentage_points is not none %}
+          {{ r.delta.gross_margin_percentage_points|pct }} percentage points
+        {% else %}n/a{% endif %}
       </td>
     </tr>
   </tbody>
 </table>
 
-<h3>Supplier contribution to the change</h3>
-{% if r.suppliers and r.scenario.increase > 0 %}
-<table class="table">
-  <thead>
-    <tr>
-      <th>Supplier</th>
-      <th>Baseline spend</th>
-      <th>Projected spend</th>
-      <th>Increase</th>
-      <th>Share of total increase</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for s in r.suppliers %}
-    <tr>
-      <td>{{ s.supplier_key }}</td>
-      <td class="cell-num">{{ s.baseline_spend|money }}</td>
-      <td class="cell-num">{{ s.projected_spend|money }}</td>
-      <td class="cell-num">{{ s.increase|money }}</td>
-      <td class="cell-num">{{ s.share_of_total_increase_pct|pct }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-{% else %}
-<p class="muted">
-  {% if r.scenario.increase_pct is none %}
-  Baseline spend is zero, so a percentage impact is undefined.
-  {% else %}
-  No supplier-level increase to rank for a price reduction.
-  {% endif %}
-</p>
-{% endif %}
-
-<div class="alert alert-info">
-  {{ r.explanation }}
-</div>
+<div class="alert alert-info">{{ r.explanation }}</div>
 
 <h3>Evidence</h3>
 <ul class="muted">
   <li>Source: {{ p.source_name }} ({{ p.snapshot_mode }})</li>
-  <li>Spend computed as {{ p.spend_shape|replace("_", " ") }} from
-    {% for k, v in p.spend_columns.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</li>
-  <li>Supplier column: {{ p.supplier_concept_column }}</li>
-  <li>{{ p.rows_considered }} rows considered, {{ p.rows_skipped }} skipped</li>
+  <li>Revenue: {{ p.revenue_concept }} mapped to {{ p.revenue_column }}</li>
+  <li>COGS: {{ p.cogs_concept }} mapped to {{ p.cogs_column }}</li>
+  <li>Currency: {{ p.currency_concept }} mapped to {{ p.currency_column }} ({{ p.currency }})</li>
+  <li>{{ p.rows_considered }} complete rows used</li>
   {% if p.ingestion_job_ids %}
   <li>Ingestion jobs: {{ p.ingestion_job_ids|join(", ") }}</li>
   {% endif %}
   {% if p.latest_ingested_at %}<li>Data ingested at {{ p.latest_ingested_at }}</li>{% endif %}
 </ul>
-{% if p.skipped_examples %}
-<details>
-  <summary class="muted">Example skipped rows ({{ p.rows_skipped }} total)</summary>
-  <ul class="muted">{% for e in p.skipped_examples %}<li>{{ e }}</li>{% endfor %}</ul>
-</details>
-{% endif %}
 
+<div class="alert alert-warning">
+  The calculation requires confirmed revenue, cost-of-goods-sold, and currency mappings
+  from this source. It does not treat generic operating costs or purchase spend as COGS.
+</div>
 <ul class="muted">
   {% for l in r.limitations %}<li>{{ l }}</li>{% endfor %}
 </ul>
@@ -101,7 +79,9 @@
 <form method="post" action="/scenarios/save" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="source_id" value="{{ preview.source_id }}">
-  <input type="hidden" name="supplier_price_change_pct" value="{{ r.price_change_pct }}">
+  <input type="hidden" name="supplier_cost_change_pct" value="{{ r.assumptions.supplier_cost_change_pct }}">
+  <input type="hidden" name="selling_price_change_pct" value="{{ r.assumptions.selling_price_change_pct }}">
+  <input type="hidden" name="volume_change_pct" value="{{ r.assumptions.volume_change_pct }}">
   <input type="text" name="name" placeholder="Name this scenario" maxlength="200" required style="width:18rem">
   <button type="submit" class="btn">Save scenario</button>
   <span class="muted">Saves the baseline as it is now, so the numbers stay reproducible.</span>
