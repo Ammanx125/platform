@@ -1,89 +1,138 @@
+{# HTMX fragment for POST /scenarios/preview.
+   Main swap  -> #scenario-result (impact + results + save)
+   OOB swap   -> #evidence-body (evidence inspector)
+   All figures are server-calculated; data-lab-* attributes feed display-only animation. #}
 {% if error %}
-<div class="alert alert-warning">
-  <strong>Cannot calculate this scenario.</strong>
-  <p>{{ error }}</p>
-  {% if missing %}
-  <p class="muted">Confirm a semantic mapping for: {{ missing|join(", ") }}.</p>
-  {% endif %}
+<div class="lab-state lab-state--err" role="alert">
+  <span class="lab-eyebrow">Cannot calculate</span>
+  <h2>This scenario can't be calculated.</h2>
+  <p class="lab-muted">{{ error }}</p>
+  {% if missing %}<p class="lab-muted">Confirm a semantic mapping for: {{ missing|join(", ") }}.</p>{% endif %}
+  <p class="lab-muted">No figures are shown, because none could be verified.</p>
+</div>
+<div id="lab-live" hx-swap-oob="innerHTML"></div>
+<div id="evidence-body" hx-swap-oob="innerHTML">
+  <section class="lab-ev"><h3>Status</h3><p class="lab-muted">No calculation is available, so there is no evidence to inspect. {{ error }}</p></section>
 </div>
 {% else %}
 {% set r = preview.result %}
 {% set p = preview.provenance %}
-<table class="table">
-  <thead>
-    <tr>
-      <th>Metric</th>
-      <th>Baseline</th>
-      <th>Scenario</th>
-      <th>Change</th>
-    </tr>
-  </thead>
+{% set gain = r.delta.gross_profit >= 0 %}
+{% set d_rev = r.scenario.revenue - r.baseline.revenue %}
+{% set d_cogs = r.scenario.cogs - r.baseline.cogs %}
+
+<div class="lab-headline">
+  <div class="lab-tag" style="justify-self:start">Hypothetical · sensitivity estimate, not a prediction</div>
+  <span class="lab-eyebrow">Change in gross profit</span>
+  <div class="lab-big {{ 'is-gain' if gain else 'is-loss' }}">
+    <span class="lab-cur">{{ r.currency }}</span>
+    <span data-lab-key="d-gp" data-lab-num="{{ r.delta.gross_profit }}" data-lab-fmt="money">{{ r.delta.gross_profit|money }}</span>
+  </div>
+  <div class="lab-sub">
+    <span>Percent&nbsp;
+      {% if r.delta.gross_profit_pct is not none %}<b data-lab-key="d-gp-pct" data-lab-num="{{ r.delta.gross_profit_pct }}" data-lab-fmt="pct">{{ r.delta.gross_profit_pct|pct }}</b>{% else %}<b>n/a (baseline is zero)</b>{% endif %}
+    </span>
+    <span>Margin&nbsp;
+      {% if r.delta.gross_margin_percentage_points is not none %}<b data-lab-key="d-gm" data-lab-num="{{ r.delta.gross_margin_percentage_points }}" data-lab-fmt="pct">{{ r.delta.gross_margin_percentage_points|pct }}</b> pts{% else %}<b>n/a</b>{% endif %}
+    </span>
+    <button type="button" class="lab-btn" data-lab-evidence aria-expanded="false" aria-controls="lab-drawer">Inspect evidence</button>
+  </div>
+</div>
+
+<div class="lab-bars" role="group" aria-label="Baseline compared with scenario">
+  {% for label, key, bv, sv in [
+      ("Revenue", "rev", r.baseline.revenue, r.scenario.revenue),
+      ("COGS", "cogs", r.baseline.cogs, r.scenario.cogs),
+      ("Gross profit", "gp", r.baseline.gross_profit, r.scenario.gross_profit)] %}
+  <div class="lab-row">
+    <div class="lab-row-name">{{ label }}</div>
+    <div class="lab-pair">
+      <div class="lab-bar-line">
+        <div class="lab-track"><div class="lab-bar {{ 'lab-bar--neg' if bv < 0 }}" data-lab-key="b-{{ key }}" data-lab-bar="{{ bv }}"></div></div>
+        <div class="lab-val"><small>Baseline</small><span data-lab-key="bv-{{ key }}" data-lab-num="{{ bv }}" data-lab-fmt="money">{{ bv|money }}</span></div>
+      </div>
+      <div class="lab-bar-line">
+        <div class="lab-track"><div class="lab-bar lab-bar--scn {% if key == 'gp' %}{{ 'is-gain' if gain else 'is-loss' }}{% endif %} {{ 'lab-bar--neg' if sv < 0 }}" data-lab-key="s-{{ key }}" data-lab-bar="{{ sv }}"></div></div>
+        <div class="lab-val"><small>Scenario</small><span data-lab-key="sv-{{ key }}" data-lab-num="{{ sv }}" data-lab-fmt="money">{{ sv|money }}</span></div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+  <div class="lab-legend"><span><i></i>Actual baseline</span><span><i class="s"></i>Hypothetical scenario</span><span>Bars share one scale · {{ r.currency }}</span></div>
+</div>
+
+<div class="lab-table-scroll">
+<table class="lab-table">
+  <thead><tr><th>What moved</th><th class="n">Baseline</th><th class="n">Scenario</th><th class="n">Change</th></tr></thead>
   <tbody>
-    <tr>
-      <td>Revenue</td>
-      <td class="cell-num">{{ r.currency }} {{ r.baseline.revenue|money }}</td>
-      <td class="cell-num">{{ r.currency }} {{ r.scenario.revenue|money }}</td>
-      <td class="cell-num">{{ r.currency }} {{ (r.scenario.revenue - r.baseline.revenue)|money }}</td>
-    </tr>
-    <tr>
-      <td>COGS</td>
-      <td class="cell-num">{{ r.currency }} {{ r.baseline.cogs|money }}</td>
-      <td class="cell-num">{{ r.currency }} {{ r.scenario.cogs|money }}</td>
-      <td class="cell-num">{{ r.currency }} {{ (r.scenario.cogs - r.baseline.cogs)|money }}</td>
-    </tr>
-    <tr>
-      <td>Gross profit</td>
-      <td class="cell-num">{{ r.currency }} {{ r.baseline.gross_profit|money }}</td>
-      <td class="cell-num">{{ r.currency }} {{ r.scenario.gross_profit|money }}</td>
-      <td class="cell-num">
-        {{ r.currency }} {{ r.delta.gross_profit|money }}
-        {% if r.delta.gross_profit_pct is not none %}({{ r.delta.gross_profit_pct|pct }}){% endif %}
-      </td>
-    </tr>
-    <tr>
-      <td>Gross margin</td>
-      <td class="cell-num">{{ r.baseline.gross_margin_pct|pct }}</td>
-      <td class="cell-num">{{ r.scenario.gross_margin_pct|pct }}</td>
-      <td class="cell-num">
-        {% if r.delta.gross_margin_percentage_points is not none %}
-          {{ r.delta.gross_margin_percentage_points|pct }} percentage points
-        {% else %}n/a{% endif %}
-      </td>
-    </tr>
+    <tr><td>Revenue</td><td class="n">{{ r.baseline.revenue|money }}</td><td class="n">{{ r.scenario.revenue|money }}</td><td class="n">{{ d_rev|money }}</td></tr>
+    <tr><td>COGS</td><td class="n">{{ r.baseline.cogs|money }}</td><td class="n">{{ r.scenario.cogs|money }}</td><td class="n">{{ d_cogs|money }}</td></tr>
+    <tr><td>Gross profit</td><td class="n">{{ r.baseline.gross_profit|money }}</td><td class="n">{{ r.scenario.gross_profit|money }}</td>
+        <td class="n">{{ r.delta.gross_profit|money }}</td></tr>
+    <tr><td>Gross margin</td>
+        <td class="n">{% if r.baseline.gross_margin_pct is not none %}{{ r.baseline.gross_margin_pct }}%{% else %}n/a{% endif %}</td>
+        <td class="n">{% if r.scenario.gross_margin_pct is not none %}{{ r.scenario.gross_margin_pct }}%{% else %}n/a{% endif %}</td>
+        <td class="n">{% if r.delta.gross_margin_percentage_points is not none %}{{ r.delta.gross_margin_percentage_points|pct }} pts{% else %}n/a{% endif %}</td></tr>
   </tbody>
 </table>
-
-<div class="alert alert-info">{{ r.explanation }}</div>
-
-<h3>Evidence</h3>
-<ul class="muted">
-  <li>Source: {{ p.source_name }} ({{ p.snapshot_mode }})</li>
-  <li>Revenue: {{ p.revenue_concept }} mapped to {{ p.revenue_column }}</li>
-  <li>COGS: {{ p.cogs_concept }} mapped to {{ p.cogs_column }}</li>
-  <li>Currency: {{ p.currency_concept }} mapped to {{ p.currency_column }} ({{ p.currency }})</li>
-  <li>{{ p.rows_considered }} complete rows used</li>
-  {% if p.ingestion_job_ids %}
-  <li>Ingestion jobs: {{ p.ingestion_job_ids|join(", ") }}</li>
-  {% endif %}
-  {% if p.latest_ingested_at %}<li>Data ingested at {{ p.latest_ingested_at }}</li>{% endif %}
-</ul>
-
-<div class="alert alert-warning">
-  The calculation requires confirmed revenue, cost-of-goods-sold, and currency mappings
-  from this source. It does not treat generic operating costs or purchase spend as COGS.
 </div>
-<ul class="muted">
-  {% for l in r.limitations %}<li>{{ l }}</li>{% endfor %}
-</ul>
+<p class="lab-muted" style="font-size:.75rem;margin-top:var(--lab-s2)">Amounts in {{ r.currency }}. Gross profit change = revenue change − COGS change.</p>
 
-<form method="post" action="/scenarios/save" style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <input type="hidden" name="source_id" value="{{ preview.source_id }}">
-  <input type="hidden" name="supplier_cost_change_pct" value="{{ r.assumptions.supplier_cost_change_pct }}">
-  <input type="hidden" name="selling_price_change_pct" value="{{ r.assumptions.selling_price_change_pct }}">
-  <input type="hidden" name="volume_change_pct" value="{{ r.assumptions.volume_change_pct }}">
-  <input type="text" name="name" placeholder="Name this scenario" maxlength="200" required style="width:18rem">
-  <button type="submit" class="btn">Save scenario</button>
-  <span class="muted">Saves the baseline as it is now, so the numbers stay reproducible.</span>
-</form>
+<p class="lab-interp">{{ r.explanation }}</p>
+
+<span data-lab-ok hidden></span>
+
+{# Narrow-screen pinned readout (server-calculated values, swapped out-of-band). #}
+<div id="lab-live" hx-swap-oob="innerHTML">
+  <span>ΔGP {{ r.currency }}</span>
+  <b class="{{ 'is-gain' if gain else 'is-loss' }}">{{ r.delta.gross_profit|money }}</b>
+  <span>{% if r.delta.gross_profit_pct is not none %}{{ r.delta.gross_profit_pct|pct }}{% else %}n/a{% endif %}</span>
+</div>
+
+<div id="evidence-body" hx-swap-oob="innerHTML">
+  <section class="lab-ev">
+    <h3>Source &amp; snapshot</h3>
+    <dl>
+      <dt>Source</dt><dd>{{ p.source_name }}</dd>
+      <dt>Source ID</dt><dd>{{ preview.source_id }}</dd>
+      <dt>Snapshot mode</dt><dd>{{ p.snapshot_mode }}</dd>
+      <dt>Ingestion jobs</dt><dd>{% if p.ingestion_job_ids %}{{ p.ingestion_job_ids|join(", ") }}{% else %}none reported{% endif %}</dd>
+      <dt>Latest ingested</dt><dd>{% if p.latest_ingested_at %}{{ p.latest_ingested_at }}{% else %}not recorded{% endif %}</dd>
+      <dt>Rows used</dt><dd>{{ p.rows_considered }} complete rows (rows with missing or invalid values block the calculation rather than being skipped)</dd>
+      <dt>Currency</dt><dd>{{ p.currency }} · {{ p.currency_concept }} ← {{ p.currency_column }}</dd>
+    </dl>
+  </section>
+
+  <section class="lab-ev">
+    <h3>Baseline calculation</h3>
+    <dl>
+      <dt>Revenue</dt><dd>Σ {{ p.revenue_column }} ({{ p.revenue_concept }}) = {{ r.currency }} {{ r.baseline.revenue|money }}</dd>
+      <dt>COGS</dt><dd>Σ {{ p.cogs_column }} ({{ p.cogs_concept }}) = {{ r.currency }} {{ r.baseline.cogs|money }}</dd>
+      <dt>Gross profit</dt><dd>{{ r.currency }} {{ r.baseline.gross_profit|money }}</dd>
+    </dl>
+  </section>
+
+  <section class="lab-ev">
+    <h3>Formula (v{{ r.formula_version }})</h3>
+    <code>scenario revenue = baseline revenue × (1 + price%) × (1 + volume%)
+scenario COGS    = baseline COGS    × (1 + cost%)  × (1 + volume%)
+gross profit     = revenue − COGS</code>
+  </section>
+
+  <section class="lab-ev">
+    <h3>Assumptions applied</h3>
+    <dl>
+      <dt>Supplier cost</dt><dd>{{ r.assumptions.supplier_cost_change_pct|pct }}</dd>
+      <dt>Selling price</dt><dd>{{ r.assumptions.selling_price_change_pct|pct }}</dd>
+      <dt>Sales volume</dt><dd>{{ r.assumptions.volume_change_pct|pct }}</dd>
+    </dl>
+  </section>
+
+  <section class="lab-ev">
+    <h3>Limitations</h3>
+    <ul>{% for l in r.limitations %}<li>{{ l }}</li>{% endfor %}
+      <li>Supplier-level contributions are not shown: the baseline is a single revenue and COGS total, with no verified per-supplier fields.</li>
+    </ul>
+  </section>
+</div>
 {% endif %}

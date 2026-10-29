@@ -22,7 +22,7 @@
 </head>
 <body>
 {% block body %}
-  <div class="shell">
+  <div class="shell{% if active_nav == 'scenarios' %} shell--scenario-lab{% endif %}">
     {% include "components/topbar.html" %}
     {% include "components/sidebar.html" %}
     <main class="main">

@@ -160,7 +160,18 @@ async def test_scenario_lab_is_reachable_from_workspace_navigation(client, two_t
     response = await client.get("/scenarios")
 
     assert response.status_code == 200
+    assert 'class="shell shell--scenario-lab"' in response.text
     assert 'href="/scenarios" aria-current="page">Scenario Lab</a>' in response.text
+
+
+@pytest.mark.asyncio
+async def test_scenario_lab_renders_without_a_ready_source(client, two_tenants):
+    await _auth(client, two_tenants["email_a"], two_tenants["password"])
+
+    response = await client.get("/scenarios")
+
+    assert response.status_code == 200
+    assert "There is no active data source yet." in response.text
 
 
 @pytest.mark.asyncio
@@ -181,9 +192,59 @@ async def test_html_preview_displays_profit_metrics_and_save_assumptions(client,
     assert response.status_code == 200
     assert "Gross profit" in response.text
     assert "216,000.00" in response.text
-    assert 'name="supplier_cost_change_pct" value="12"' in response.text
-    assert 'name="selling_price_change_pct" value="0"' in response.text
-    assert 'name="volume_change_pct" value="0"' in response.text
+    assert "Supplier cost" in response.text
+    assert "12%" in response.text
+
+
+@pytest.mark.asyncio
+async def test_html_duplicate_prefills_saved_assumptions(client, two_tenants):
+    source_id = await _make_ready_source(tenant_id=two_tenants["tenant_a"])
+    headers = await _auth(client, two_tenants["email_a"], two_tenants["password"])
+    created = await client.post(
+        "/api/v1/scenarios",
+        headers=headers,
+        json={
+            **_request(
+                source_id,
+                {
+                    "supplier_cost_change_pct": "15",
+                    "selling_price_change_pct": "2",
+                    "volume_change_pct": "-5",
+                },
+            ),
+            "name": "Duplicate me",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    response = await client.get("/scenarios", params={"from": created.json()["id"]})
+
+    assert response.status_code == 200
+    assert 'name="supplier_cost_change_pct"' in response.text
+    assert 'value="15"' in response.text
+    assert 'value="2"' in response.text
+    assert 'value="-5"' in response.text
+
+
+@pytest.mark.asyncio
+async def test_html_save_redirects_with_confirmation_flag(client, two_tenants):
+    source_id = await _make_ready_source(tenant_id=two_tenants["tenant_a"])
+    await _auth(client, two_tenants["email_a"], two_tenants["password"])
+
+    response = await client.post(
+        "/scenarios/save",
+        data={
+            "csrf_token": client.cookies.get("sansa_csrf"),
+            "name": "Cost +12%",
+            "source_id": str(source_id),
+            **DEFAULT_ASSUMPTIONS,
+        },
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/scenarios?saved=1"
+    saved_page = await client.get(response.headers["location"])
+    assert 'id="lab-toast" role="status" data-show="true"' in saved_page.text
 
 
 @pytest.mark.asyncio
@@ -223,7 +284,7 @@ async def test_legacy_saved_scenarios_are_visible_but_not_misreported(client, tw
     )
     assert legacy_summary["supported"] is False
     assert legacy_summary["baseline_gross_profit"] is None
-    assert "unsupported legacy scenario" in page.text
+    assert "Unavailable (legacy format)" in page.text
 
 
 @pytest.mark.asyncio
@@ -435,6 +496,14 @@ async def test_compare_requires_same_source_and_currency(client, two_tenants):
     assert response.json()["source_id"] == str(source_id)
     assert response.json()["currency"] == "USD"
     assert len(response.json()["scenarios"]) == 2
+
+    html_response = await client.get(
+        "/scenarios/compare", params=[("ids", ids[0]), ("ids", ids[1])]
+    )
+    assert html_response.status_code == 200
+    assert "Cost +5%" in html_response.text
+    assert "Cost +12%" in html_response.text
+    assert "Scenario gross profit" in html_response.text
 
 
 @pytest.mark.asyncio

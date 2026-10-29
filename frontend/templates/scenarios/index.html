@@ -2,169 +2,252 @@
 {% block title %}Scenario Lab · Sansa{% endblock %}
 
 {% block main %}
-<div class="page-header">
-  <div>
-    <h1>Scenario Lab</h1>
-    <p class="muted">Procurement and gross-profit sensitivity based on your verified financial data.</p>
-  </div>
-</div>
+{% include "scenarios/_lab_styles.html" %}
 
-{# ---------- 1. Is any data usable? ---------- #}
-<section class="card">
-  <h2>1. Business data</h2>
+{% set ready = capabilities|selectattr("supported")|list %}
+{# `bounds` comes from engine constants via the route (see ROUTE_CHANGES.md). The fallback only
+   keeps the page rendering if the route hasn't been updated; the server validates regardless. #}
+{% set b = bounds or {
+  "supplier_cost_change_pct": {"min": 0, "max": 30},
+  "selling_price_change_pct": {"min": -10, "max": 20},
+  "volume_change_pct": {"min": -30, "max": 30}
+} %}
+{% set f = form or {} %}
+
+<div class="lab">
+
+  {# ============ A. Masthead / readiness ============ #}
+  <header class="lab-mast">
+    <div>
+      <span class="lab-eyebrow">Sansa · Scenario Lab · profit_sensitivity_v1</span>
+      <h1>What happens to gross profit if costs, prices or volume move?</h1>
+      <p>A deterministic sensitivity instrument over your confirmed revenue and cost-of-goods-sold data. Not a forecast. Nothing here writes to your ERP.</p>
+    </div>
+    <div class="lab-ready" aria-label="Source readiness">
+      <div>
+        <span class="lab-eyebrow">Sources</span>
+        <b><span class="lab-dot {% if not ready %}lab-dot--off{% endif %}"></span>{{ ready|length }} of {{ capabilities|length }} ready</b>
+      </div>
+      {% if selected_source %}
+      <div>
+        <span class="lab-eyebrow">Baseline</span>
+        <b>{{ selected_source.rows_considered }} rows · {{ selected_source.snapshot_mode }}</b>
+      </div>
+      {% endif %}
+    </div>
+  </header>
 
   {% if not capabilities %}
-    <p class="muted">No active data sources. Ingest data before running a scenario.</p>
+    {# ---- empty: nothing ingested ---- #}
+    <section class="lab-stage">
+      <div class="lab-state">
+        <span class="lab-eyebrow">No data</span>
+        <h2>There is no active data source yet.</h2>
+        <p class="lab-muted">Ingest a source that includes revenue, cost of goods sold and currency columns, confirm their semantic mappings, then return here.</p>
+      </div>
+    </section>
+
   {% elif not selected_source %}
-    <div class="alert alert-warning">
-      <strong>This tenant cannot run a profit scenario yet.</strong>
-      <p>{{ capabilities|length }} active source(s) were checked. Each one below says exactly what is missing.</p>
-    </div>
-  {% else %}
-    <p class="muted">Ready source:</p>
-    <p>
-      <strong>{{ selected_source.source_name }}</strong>
-      <span class="badge badge-info">{{ selected_source.source_type }}</span>
-      <span class="badge badge-neutral">{{ selected_source.snapshot_mode }}</span>
-    </p>
-    <p class="muted">
-      {{ selected_source.currency }} {{ selected_source.revenue|money }} revenue ·
-      {{ selected_source.currency }} {{ selected_source.cogs|money }} COGS ·
-      {{ selected_source.rows_considered }} complete rows
-    </p>
-  {% endif %}
+    {# ---- blocked: sources exist but none qualifies ---- #}
+    <section class="lab-stage">
+      <div class="lab-state lab-state--err">
+        <span class="lab-eyebrow">Cannot simulate</span>
+        <h2>No source can support a profit scenario yet.</h2>
+        <p class="lab-muted">{{ capabilities|length }} active source(s) were checked. Each states exactly what is missing; the Lab will not substitute generic costs or purchase spend for COGS.</p>
+      </div>
+      <div class="lab-table-scroll">
+      <table class="lab-table">
+        <thead><tr><th>Source</th><th>Mode</th><th>Reason</th><th>Detail</th></tr></thead>
+        <tbody>
+        {% for c in capabilities %}
+          <tr>
+            <td>{{ c.source_name }}</td><td>{{ c.snapshot_mode }}</td>
+            <td><span class="lab-chip lab-chip--stale">{{ c.code }}</span></td>
+            <td class="lab-muted">{{ c.detail }}{% if c.missing_concepts %}<br>Needs a confirmed mapping for: {{ c.missing_concepts|join(", ") }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </section>
 
-  {% if capabilities and (not selected_source or capabilities|length > 1) %}
-  <details>
-    <summary class="muted">All sources ({{ capabilities|length }})</summary>
-    <table class="table">
-      <thead>
-        <tr><th>Source</th><th>Mode</th><th>Status</th><th>Detail</th></tr>
-      </thead>
-      <tbody>
-      {% for c in capabilities %}
-        <tr>
-          <td>{{ c.source_name }}</td>
-          <td>{{ c.snapshot_mode }}</td>
-          <td>
-            {% if c.supported %}
-              <span class="badge badge-success">ready</span>
-            {% else %}
-              <span class="badge badge-warning">{{ c.code }}</span>
-            {% endif %}
-          </td>
-          <td class="muted">
-            {{ c.detail }}
-            {% if c.missing_concepts %}
-              <br><em>Needs a confirmed mapping for: {{ c.missing_concepts|join(", ") }}</em>
-            {% endif %}
-          </td>
-        </tr>
+  {% else %}
+  {# ============ B. Workbench ============ #}
+  <div class="lab-bench">
+
+    {# Narrow screens only: pinned live readout so the outcome stays visible while adjusting controls. #}
+    <div class="lab-live" id="lab-live" aria-hidden="true"></div>
+
+    {# ---- Zone 1: assumptions ---- #}
+    <form id="scenario-form" class="lab-rail"
+          hx-post="/scenarios/preview"
+          hx-target="#scenario-result"
+          hx-swap="innerHTML"
+          hx-trigger="load, input delay:250ms, submit"
+          hx-sync="this:replace"
+          autocomplete="off">
+      <div>
+        <span class="lab-eyebrow">Assumptions</span>
+      </div>
+
+      {% if ready|length > 1 %}
+      <div class="lab-ctl">
+        <label for="source_id">Source</label>
+        <select id="source_id" name="source_id" class="lab-btn" style="width:100%">
+          {% for c in ready %}
+            <option value="{{ c.source_id }}" {% if f.source_id|string == c.source_id|string or (not f.source_id and loop.first) %}selected{% endif %}>{{ c.source_name }} · {{ c.currency }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% else %}
+      <input type="hidden" name="source_id" value="{{ selected_source.source_id }}">
+      <div class="lab-ctl">
+        <span class="lab-eyebrow">Baseline source</span>
+        <p style="overflow-wrap:anywhere">{{ selected_source.source_name }}</p>
+        <small>{{ selected_source.currency }} · {{ selected_source.snapshot_mode }}</small>
+      </div>
+      {% endif %}
+
+      <div class="lab-presets" role="group" aria-label="Presets">
+        <button type="button" class="lab-btn" aria-pressed="false" data-preset='{"supplier_cost_change_pct":0,"selling_price_change_pct":0,"volume_change_pct":0}'>Reset</button>
+        <button type="button" class="lab-btn" aria-pressed="false" data-preset='{"supplier_cost_change_pct":12,"selling_price_change_pct":0,"volume_change_pct":0}'>Cost +12%</button>
+        <button type="button" class="lab-btn" aria-pressed="false" data-preset='{"supplier_cost_change_pct":12,"selling_price_change_pct":5,"volume_change_pct":0}'>Cost +12%, price +5%</button>
+        <button type="button" class="lab-btn" aria-pressed="false" data-preset='{"supplier_cost_change_pct":20,"selling_price_change_pct":0,"volume_change_pct":0}'>Cost +20%</button>
+      </div>
+
+      {% set ctls = [
+        ("supplier_cost_change_pct", "Supplier cost / COGS", "Applies to COGS only", f.supplier_cost_change_pct|default(12), b.supplier_cost_change_pct),
+        ("selling_price_change_pct", "Selling price", "Applies to revenue only", f.selling_price_change_pct|default(0), b.selling_price_change_pct),
+        ("volume_change_pct", "Sales volume", "Scales revenue and COGS together", f.volume_change_pct|default(0), b.volume_change_pct)
+      ] %}
+      {% for name, label, hint, val, bnd in ctls %}
+      <div class="lab-ctl" data-invalid="false">
+        <div class="lab-ctl-head">
+          <label for="{{ name }}">{{ label }}</label>
+          <span class="lab-numwrap">
+            <input id="{{ name }}" name="{{ name }}" type="number" inputmode="decimal"
+                   step="0.1" min="{{ bnd.min }}" max="{{ bnd.max }}" value="{{ val }}" required
+                   aria-describedby="{{ name }}-hint {{ name }}-err">
+            <span aria-hidden="true">%</span>
+          </span>
+        </div>
+        <input class="lab-range" type="range" data-for="{{ name }}" step="0.1"
+               min="{{ bnd.min }}" max="{{ bnd.max }}" value="{{ val }}" aria-label="{{ label }} change, slider">
+        <div class="lab-ticks" aria-hidden="true"><span>{{ bnd.min }}%</span><span>{{ bnd.max }}%</span></div>
+        <small id="{{ name }}-hint">{{ hint }}</small>
+        <span class="lab-err" id="{{ name }}-err" role="alert"></span>
+      </div>
       {% endfor %}
-      </tbody>
-    </table>
-  </details>
-  {% endif %}
-</section>
 
-{# ---------- 2. Assumptions ---------- #}
-{% if selected_source %}
-<section class="card">
-  <h2>2. Define the scenario</h2>
-  <form id="scenario-form"
-        hx-post="/scenarios/preview"
-        hx-target="#scenario-result"
-        hx-swap="innerHTML"
-        hx-trigger="submit">
-    <input type="hidden" name="source_id" value="{{ selected_source.source_id }}">
-    <label for="supplier_cost_change_pct">Supplier cost / COGS change (%)</label>
-    <input id="supplier_cost_change_pct" name="supplier_cost_change_pct"
-           type="number" value="12" step="0.1" min="0" max="30" required>
-    <label for="selling_price_change_pct">Selling price change (%)</label>
-    <input id="selling_price_change_pct" name="selling_price_change_pct"
-           type="number" value="0" step="0.1" min="-10" max="20" required>
-    <label for="volume_change_pct">Sales volume change (%)</label>
-    <input id="volume_change_pct" name="volume_change_pct"
-           type="number" value="0" step="0.1" min="-30" max="30" required>
-    <p class="muted">Volume scales revenue and COGS together. Selling price affects revenue; supplier cost affects COGS. Demand elasticity is not modeled.</p>
-    <button type="submit" class="btn">Calculate</button>
-  </form>
-</section>
+      <div class="lab-notice">
+        <b>Held constant:</b> purchasing mix and unit volumes, except where you change volume above. Demand elasticity, taxes, discounts, fixed costs and currency conversion are not modeled.
+      </div>
+      <noscript><button type="submit" class="lab-btn lab-btn--primary">Calculate</button></noscript>
+    </form>
 
-<section class="card">
-  <h2>3. Review the impact</h2>
-  <div id="scenario-result">
-    <p class="muted">Change an assumption and press Calculate. Nothing is saved until you name and save the scenario.</p>
+    {# ---- Zones 2 + 3: impact + results (server fragment lands here) ---- #}
+    <section class="lab-stage" id="lab-stage" aria-labelledby="lab-stage-title">
+      <h2 id="lab-stage-title" class="lab-eyebrow" style="margin-bottom:var(--lab-s4)">Impact · sensitivity estimate</h2>
+      <div id="scenario-result" class="lab-result" aria-live="polite" aria-busy="false">
+        <div class="lab-skel" aria-label="Calculating"><i></i><i></i><i></i><i></i></div>
+      </div>
+
+      {# Persistent save bar: outside the swapped result, so a typed name survives recalculation. #}
+      <form class="lab-actions lab-save" id="lab-save" method="post" action="/scenarios/save" data-ready="false">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="source_id" value="{{ selected_source.source_id }}">
+        <input type="hidden" name="supplier_cost_change_pct" value="">
+        <input type="hidden" name="selling_price_change_pct" value="">
+        <input type="hidden" name="volume_change_pct" value="">
+        <label for="lab-save-name" class="lab-eyebrow" style="flex-basis:100%">Save this scenario</label>
+        <input id="lab-save-name" type="text" name="name" placeholder="e.g. Supplier cost +12%" maxlength="200" required disabled>
+        <button type="submit" class="lab-btn lab-btn--primary" disabled>Save scenario</button>
+        <span class="lab-muted" style="font-size:.75rem">Enabled once a calculation succeeds. Freezes today's baseline so the numbers stay reproducible.</span>
+      </form>
+    </section>
   </div>
-</section>
-{% endif %}
-
-{# ---------- 4. Saved scenarios ---------- #}
-<section class="card">
-  <h2>Saved scenarios</h2>
-  <form method="post" action="/scenarios/stale-scan" style="margin-bottom:.75rem">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="btn">Check for stale scenarios</button>
-    <span class="muted">Flags scenarios whose source data has changed since they were calculated. Saved numbers are never overwritten.</span>
-  </form>
-
-  {% if scenarios %}
-  <table class="table">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Baseline gross profit</th><th>Scenario gross profit</th><th>Change</th>
-        <th>Status</th><th></th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for s in scenarios %}
-      <tr>
-        <td>{{ s.name }}</td>
-        <td class="cell-num">
-          {% if s.supported %}{{ s.currency }} {{ s.baseline_gross_profit|money }}{% else %}Unavailable{% endif %}
-        </td>
-        <td class="cell-num">
-          {% if s.supported %}{{ s.currency }} {{ s.scenario_gross_profit|money }}{% else %}Unavailable{% endif %}
-        </td>
-        <td class="cell-num">
-          {% if s.supported %}{{ s.currency }} {{ s.gross_profit_change|money }}{% else %}Unavailable{% endif %}
-        </td>
-        <td>
-          {% if not s.supported %}
-            <span class="badge badge-warning">unsupported legacy scenario</span>
-          {% elif s.is_stale %}
-            <span class="badge badge-danger">stale</span>
-          {% else %}
-            <span class="badge badge-success">{{ s.status }}</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if s.supported %}
-            <form method="post" action="/scenarios/{{ s.id }}/recalculate" style="display:inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="btn">Recalculate</button>
-            </form>
-          {% endif %}
-        </td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-    <p class="muted">No saved scenarios yet.</p>
   {% endif %}
-</section>
 
-{# ---------- 5. Assumptions / limitations ---------- #}
-<section class="card">
-  <h2>What these numbers assume</h2>
-  <ul class="muted">
-    {% for l in limitations %}<li>{{ l }}</li>{% endfor %}
-  </ul>
-  <p class="muted">
-    This is a deterministic sensitivity calculation over data already in Sansa.
-    It does not forecast demand, place orders, or write to the ERP.
-  </p>
-</section>
+  {# ============ D. Saved scenarios + comparison ============ #}
+  <section class="lab-saved" aria-labelledby="lab-saved-title">
+    <div class="lab-saved-head">
+      <h2 id="lab-saved-title">Saved scenarios</h2>
+      <form method="post" action="/scenarios/stale-scan">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="lab-btn">Check for stale</button>
+      </form>
+    </div>
+
+    {% if scenarios %}
+    <form id="lab-compare-form" method="get" action="/scenarios/compare">
+      <div class="lab-table-scroll">
+      <table class="lab-table">
+        <thead>
+          <tr><th><span class="sr-only" style="position:absolute;left:-9999px">Select</span></th><th>Name</th><th class="n">Baseline GP</th><th class="n">Scenario GP</th><th class="n">Change</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+        {% for s in scenarios %}
+          <tr>
+            <td>{% if s.supported and not s.is_stale %}<input type="checkbox" name="ids" value="{{ s.id }}" aria-label="Select {{ s.name }} for comparison">{% endif %}</td>
+            <td><span class="lab-name" title="{{ s.name }}">{{ s.name }}</span></td>
+            {% if s.supported %}
+              <td class="n">{{ s.currency }} {{ s.baseline_gross_profit|money }}</td>
+              <td class="n">{{ s.currency }} {{ s.scenario_gross_profit|money }}</td>
+              <td class="n">{{ s.currency }} {{ s.gross_profit_change|money }}</td>
+            {% else %}
+              <td class="n lab-muted" colspan="3">Unavailable (legacy format)</td>
+            {% endif %}
+            <td>
+              {% if not s.supported %}<span class="lab-chip">legacy</span>
+              {% elif s.is_stale %}<span class="lab-chip lab-chip--stale">stale</span>
+              {% else %}<span class="lab-chip lab-chip--ok">{{ s.status }}</span>{% endif %}
+            </td>
+            <td style="white-space:nowrap">
+              {% if s.supported %}
+              <a class="lab-btn" href="/scenarios?from={{ s.id }}">Duplicate</a>
+              <button class="lab-btn" type="submit" form="recalc-{{ s.id }}">Recalculate</button>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      <div class="lab-actions" style="border:0;padding-top:var(--lab-s3);margin-top:0">
+        <button type="submit" class="lab-btn lab-btn--primary" data-lab-compare-go disabled>Select 2–3 to compare</button>
+        <span class="lab-muted" style="font-size:.78rem">Comparison requires the same source and currency; otherwise it is refused, not approximated. Duplicate loads a scenario's assumptions into the workbench; saving creates a new scenario.</span>
+      </div>
+    </form>
+    {# Recalculate forms live outside the compare form (nested forms are invalid HTML). #}
+    {% for s in scenarios if s.supported %}
+    <form id="recalc-{{ s.id }}" method="post" action="/scenarios/{{ s.id }}/recalculate" hidden>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    </form>
+    {% endfor %}
+    {% else %}
+      <p class="lab-muted">No saved scenarios yet. Calculate one above, name it, and save the frozen baseline.</p>
+    {% endif %}
+  </section>
+
+  <section class="lab-limits" aria-labelledby="lab-limits-title">
+    <span class="lab-eyebrow" id="lab-limits-title">What these numbers assume</span>
+    <ul>{% for l in limitations %}<li>{{ l }}</li>{% endfor %}</ul>
+  </section>
+
+  {# ============ C. Evidence inspector ============ #}
+  <div class="lab-scrim" id="lab-scrim"></div>
+  <aside class="lab-drawer" id="lab-drawer" role="dialog" aria-modal="true" aria-labelledby="lab-drawer-title" aria-hidden="true">
+    <div class="lab-drawer-head">
+      <h2 id="lab-drawer-title" class="lab-eyebrow">Evidence inspector</h2>
+      <button type="button" class="lab-btn" data-lab-close>Close</button>
+    </div>
+    <div class="lab-drawer-body" id="evidence-body">
+      <p class="lab-muted">Evidence appears here once a calculation completes.</p>
+    </div>
+  </aside>
+
+  <div class="lab-toast" id="lab-toast" role="status" data-show="{{ 'true' if saved else 'false' }}">Scenario saved with its frozen baseline</div>
+</div>
+
+{% include "scenarios/_lab_script.html" %}
 {% endblock %}

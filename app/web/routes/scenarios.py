@@ -15,7 +15,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,6 +73,23 @@ templates.env.filters["money"] = _fmt_money
 templates.env.filters["pct"] = _fmt_pct
 
 
+def _bounds() -> dict[str, dict[str, Decimal]]:
+    return {
+        "supplier_cost_change_pct": {
+            "min": engine.SUPPLIER_COST_CHANGE_MIN,
+            "max": engine.SUPPLIER_COST_CHANGE_MAX,
+        },
+        "selling_price_change_pct": {
+            "min": engine.SELLING_PRICE_CHANGE_MIN,
+            "max": engine.SELLING_PRICE_CHANGE_MAX,
+        },
+        "volume_change_pct": {
+            "min": engine.VOLUME_CHANGE_MIN,
+            "max": engine.VOLUME_CHANGE_MAX,
+        },
+    }
+
+
 async def _page_context(db: AsyncSession, *, tenant_id: uuid.UUID) -> dict[str, Any]:
     capabilities = await scenario_service.capabilities(db, tenant_id=tenant_id)
     scenarios = await scenario_service.list_scenarios(db, tenant_id=tenant_id, limit=PAGE_LIMIT)
@@ -89,8 +106,24 @@ async def scenarios_page(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     user: HtmlUser,
+    from_: Annotated[uuid.UUID | None, Query(alias="from")] = None,
+    saved: int = 0,
 ) -> HTMLResponse:
     context = await _page_context(db, tenant_id=user.tenant_id)
+    prefill: dict[str, Any] = {}
+    if from_ is not None:
+        try:
+            source_scenario = await scenario_service.get(
+                db, tenant_id=user.tenant_id, scenario_id=from_
+            )
+        except scenario_service.ScenarioNotFound:
+            source_scenario = None
+        if source_scenario is not None and source_scenario.scenario_type == engine.SCENARIO_TYPE:
+            prefill = {
+                key: str(value) for key, value in (source_scenario.assumptions or {}).items()
+            }
+            prefill["source_id"] = str(source_scenario.source_id)
+
     context.update(
         request=request,
         user=user,
@@ -101,10 +134,50 @@ async def scenarios_page(
         user_email=user.email,
         preview=None,
         error=None,
-        form={},
+        form=prefill,
+        saved=bool(saved),
+        bounds=_bounds(),
         csrf_token=request.cookies.get(settings.csrf_cookie_name, ""),
     )
     return templates.TemplateResponse(request, "scenarios/index.html", context)
+
+
+@router.get("/scenarios/compare", response_class=HTMLResponse)
+async def scenarios_compare(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user: HtmlUser,
+    ids: Annotated[list[uuid.UUID] | None, Query()] = None,
+) -> HTMLResponse:
+    comparison = None
+    error = None
+    ids = ids or []
+    if not 2 <= len(ids) <= 3 or len(set(ids)) != len(ids):
+        error = "Select two or three different saved scenarios."
+    else:
+        try:
+            comparison = await scenario_service.compare_scenarios(
+                db, tenant_id=user.tenant_id, scenario_ids=ids
+            )
+        except scenario_service.ScenarioNotFound:
+            error = "One of those scenarios no longer exists."
+        except scenario_service.ScenarioServiceError as exc:
+            error = str(exc)
+    return templates.TemplateResponse(
+        request,
+        "scenarios/compare.html",
+        {
+            "request": request,
+            "user": user,
+            **base_context(),
+            "loop_stage": "scenarios",
+            "active_nav": "scenarios",
+            "tenant_name": str(user.tenant_id),
+            "user_email": user.email,
+            "comparison": comparison,
+            "error": error,
+        },
+    )
 
 
 @router.post("/scenarios/preview", response_class=HTMLResponse)
@@ -248,7 +321,7 @@ async def scenarios_save(
         await db.rollback()
         return RedirectResponse("/scenarios", status_code=303)
     await db.commit()
-    return RedirectResponse("/scenarios", status_code=303)
+    return RedirectResponse("/scenarios?saved=1", status_code=303)
 
 
 @router.post(

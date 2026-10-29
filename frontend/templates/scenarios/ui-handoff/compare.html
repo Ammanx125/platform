@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Compare scenarios · Sansa{% endblock %}
+
+{% block main %}
+{% include "scenarios/_lab_styles.html" %}
+<div class="lab">
+  <header class="lab-mast">
+    <div>
+      <span class="lab-eyebrow">Sansa · Scenario Lab · comparison</span>
+      <h1>Scenarios against one baseline</h1>
+      {% if comparison %}<p>All scenarios share source <b>{{ comparison.source_id }}</b> and currency <b>{{ comparison.currency }}</b>. Each uses the baseline frozen when it was saved.</p>{% endif %}
+    </div>
+    <div class="lab-ready"><a class="lab-btn" href="/scenarios">Back to workbench</a></div>
+  </header>
+
+  <section class="lab-stage">
+  {% if error %}
+    <div class="lab-state lab-state--err" role="alert">
+      <span class="lab-eyebrow">Cannot compare</span>
+      <h2>These scenarios can't be compared.</h2>
+      <p class="lab-muted">{{ error }}</p>
+    </div>
+  {% else %}
+    {% set cur = comparison.currency %}
+    <div class="lab-table-scroll">
+    <table class="lab-table">
+      <thead>
+        <tr><th>Measure</th>{% for s in comparison.scenarios %}<th class="n"><span class="lab-name" title="{{ s.name }}">{{ s.name }}</span></th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        <tr><td class="lab-muted">Status</td>{% for s in comparison.scenarios %}<td class="n">{% if s.is_stale %}<span class="lab-chip lab-chip--stale">stale</span>{% else %}<span class="lab-chip lab-chip--ok">{{ s.status }}</span>{% endif %}</td>{% endfor %}</tr>
+        <tr><td class="lab-muted">Supplier cost</td>{% for s in comparison.scenarios %}<td class="n">{{ s.result.assumptions.supplier_cost_change_pct|pct }}</td>{% endfor %}</tr>
+        <tr><td class="lab-muted">Selling price</td>{% for s in comparison.scenarios %}<td class="n">{{ s.result.assumptions.selling_price_change_pct|pct }}</td>{% endfor %}</tr>
+        <tr><td class="lab-muted">Volume</td>{% for s in comparison.scenarios %}<td class="n">{{ s.result.assumptions.volume_change_pct|pct }}</td>{% endfor %}</tr>
+        <tr><td>Baseline gross profit ({{ cur }})</td>{% for s in comparison.scenarios %}<td class="n">{{ s.result.baseline.gross_profit|money }}</td>{% endfor %}</tr>
+        <tr><td>Scenario gross profit ({{ cur }})</td>{% for s in comparison.scenarios %}<td class="n">{{ s.result.scenario.gross_profit|money }}</td>{% endfor %}</tr>
+        <tr><td>Change ({{ cur }})</td>{% for s in comparison.scenarios %}<td class="n" style="color:{{ 'var(--lab-accent)' if s.result.delta.gross_profit >= 0 else 'var(--lab-loss)' }}">{{ s.result.delta.gross_profit|money }}</td>{% endfor %}</tr>
+        <tr><td>Change %</td>{% for s in comparison.scenarios %}<td class="n">{{ s.result.delta.gross_profit_pct|pct }}</td>{% endfor %}</tr>
+        <tr><td>Gross margin</td>{% for s in comparison.scenarios %}<td class="n">{% if s.result.scenario.gross_margin_pct is not none %}{{ s.result.scenario.gross_margin_pct }}%{% else %}n/a{% endif %}</td>{% endfor %}</tr>
+        <tr><td class="lab-muted">Baseline frozen at</td>{% for s in comparison.scenarios %}<td class="n" style="font-size:.7rem">{{ s.provenance.latest_ingested_at or "not recorded" }}</td>{% endfor %}</tr>
+      </tbody>
+    </table>
+    </div>
+    {% set revs = comparison.scenarios|map(attribute="result.baseline.revenue")|unique|list %}
+    {% if revs|length > 1 %}
+    <div class="lab-notice lab-notice--warn" style="margin-top:var(--lab-s5)">
+      These scenarios were calculated against <b>different baseline figures</b> (the source data changed between saves). Recalculate them from the workbench to put them on the current baseline before drawing conclusions.
+    </div>
+    {% endif %}
+    <p class="lab-muted" style="font-size:.78rem;margin-top:var(--lab-s4)">Hypothetical sensitivity estimates, not predictions. Purchasing mix and unit volumes are held constant except for the volume assumption shown.</p>
+  {% endif %}
+  </section>
+</div>
+{% endblock %}

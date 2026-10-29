@@ -1,0 +1,257 @@
+<script>
+/* Scenario Lab client behaviour.
+ * Presentation only: slider/number sync, request lifecycle classes, tweening of
+ * DISPLAYED numbers, bar geometry, evidence drawer, toast.
+ * All figures come from the server fragment (authoritative). Tweened values are
+ * transient and always replaced by the server-rendered text when animation ends.
+ */
+(function () {
+  "use strict";
+  var root = document.querySelector(".lab");
+  if (!root) return;
+
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var prevNum = {};   // key -> last server number (animation state, not a result)
+  var prevW = {};     // key -> last bar width %
+
+  function money(n) {
+    return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  }
+  function decimalsOf(text) {
+    var m = /\.(\d+)/.exec(text);
+    return m ? m[1].length : 0;
+  }
+  function fmt(kind, n, dec) {
+    if (kind === "pct") return (n > 0 ? "+" : "") + n.toFixed(dec) + "%";
+    return new Intl.NumberFormat("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(n);
+  }
+  function ease(t) { return 1 - Math.pow(1 - t, 3); }
+
+  /* ---------- number tweening ---------- */
+  function tween(el, from, to, kind, finalText) {
+    var start = null, dur = 480;
+    function step(ts) {
+      if (start === null) start = ts;
+      var t = Math.min((ts - start) / dur, 1);
+      el.textContent = fmt(kind, from + (to - from) * ease(t), decimalsOf(finalText));
+      if (t < 1) { requestAnimationFrame(step); } else { el.textContent = finalText; }
+    }
+    requestAnimationFrame(step);
+  }
+
+  function processResult(scope) {
+    var changed = false;
+    scope.querySelectorAll("[data-lab-num]").forEach(function (el) {
+      var key = el.getAttribute("data-lab-key");
+      var to = Number(el.getAttribute("data-lab-num"));
+      var kind = el.getAttribute("data-lab-fmt") || "money";
+      var finalText = el.textContent;
+      var from = prevNum[key];
+      prevNum[key] = to;
+      if (!isFinite(to) || from === undefined || from === to) return;
+      changed = true;
+      el.classList.add("is-changed");
+      setTimeout(function () { el.classList.remove("is-changed"); }, 900);
+      if (!reduce.matches) tween(el, from, to, kind, finalText);
+    });
+    return changed;
+  }
+
+  /* ---------- bar geometry (shared scale across the six bars) ---------- */
+  function processBars(scope) {
+    var bars = scope.querySelectorAll("[data-lab-bar]");
+    var max = 0;
+    bars.forEach(function (b) { max = Math.max(max, Math.abs(Number(b.getAttribute("data-lab-bar")))); });
+    bars.forEach(function (b) {
+      var key = b.getAttribute("data-lab-key");
+      var v = Math.abs(Number(b.getAttribute("data-lab-bar")));
+      var w = max > 0 ? (v / max) * 100 : 0;
+      var from = prevW[key];
+      prevW[key] = w;
+      if (from === undefined || reduce.matches) { b.style.width = w + "%"; return; }
+      b.style.width = from + "%";            // start where the previous bar ended
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { b.style.width = w + "%"; });
+      });
+    });
+  }
+
+  /* ---------- controls ---------- */
+  function span(input) { return Number(input.max) - Number(input.min); }
+  function paintFill(range) {
+    var p = span(range) ? ((Number(range.value) - Number(range.min)) / span(range)) * 100 : 0;
+    range.style.setProperty("--fill", p + "%");
+  }
+
+  function validate(ctl) {
+    var num = ctl.querySelector('input[type="number"]');
+    var err = ctl.querySelector(".lab-err");
+    var raw = num.value.trim();
+    var v = Number(raw);
+    var msg = "";
+    if (raw === "" || !isFinite(v)) msg = "Enter a number.";
+    else if (v < Number(num.min) || v > Number(num.max)) msg = "Must be between " + num.min + " and " + num.max + ".";
+    ctl.setAttribute("data-invalid", msg ? "true" : "false");
+    num.setAttribute("aria-invalid", msg ? "true" : "false");
+    if (err) err.textContent = msg;
+    return !msg;
+  }
+
+  var form = document.getElementById("scenario-form");
+  var stage = document.getElementById("lab-stage");
+
+  function allValid() {
+    var ok = true;
+    form.querySelectorAll(".lab-ctl").forEach(function (c) { if (!validate(c)) ok = false; });
+    return ok;
+  }
+
+  form.querySelectorAll(".lab-ctl").forEach(function (ctl) {
+    var range = ctl.querySelector(".lab-range");
+    var num = ctl.querySelector('input[type="number"]');
+    paintFill(range);
+    range.addEventListener("input", function () {
+      num.value = range.value;
+      paintFill(range);
+      validate(ctl);
+      form.querySelectorAll(".lab-btn[data-preset]").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+    });
+    num.addEventListener("input", function () {
+      if (validate(ctl)) { range.value = num.value; paintFill(range); }
+    });
+  });
+
+  form.querySelectorAll(".lab-btn[data-preset]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var vals = JSON.parse(btn.getAttribute("data-preset"));
+      Object.keys(vals).forEach(function (name) {
+        var num = form.querySelector('input[name="' + name + '"]');
+        var range = form.querySelector('.lab-range[data-for="' + name + '"]');
+        num.value = vals[name]; range.value = vals[name]; paintFill(range);
+        validate(num.closest(".lab-ctl"));
+      });
+      form.querySelectorAll(".lab-btn[data-preset]").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      form.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
+
+  /* Block requests while any field is invalid (server still validates). */
+  document.body.addEventListener("htmx:confirm", function (e) {
+    if (e.target === form) { if (!allValid()) { e.preventDefault(); } }
+  });
+
+  /* ---------- request lifecycle ---------- */
+  var resultBox = document.getElementById("scenario-result");
+  var saveBox = document.getElementById("lab-save");
+  function setSaveReady(ok) {
+    if (!saveBox) return;
+    saveBox.setAttribute("data-ready", ok ? "true" : "false");
+    saveBox.querySelectorAll("input[type=text], button").forEach(function (c) { c.disabled = !ok; });
+  }
+  document.body.addEventListener("htmx:beforeRequest", function (e) {
+    if (e.target === form) { stage.classList.add("is-loading"); resultBox.setAttribute("aria-busy", "true"); }
+  });
+  document.body.addEventListener("htmx:afterRequest", function (e) {
+    if (e.target === form) { stage.classList.remove("is-loading"); resultBox.setAttribute("aria-busy", "false"); }
+  });
+  /* A new source means different magnitudes: don't tween across sources. */
+  var srcSel = document.getElementById("source_id");
+  if (srcSel) srcSel.addEventListener("change", function () { prevNum = {}; prevW = {}; });
+
+  /* Save bar: copy live control values at submit time; only the server result counts. */
+  if (saveBox) {
+    var saveForm = saveBox;
+    saveForm.addEventListener("submit", function (e) {
+      if (!allValid()) { e.preventDefault(); return; }
+      ["source_id", "supplier_cost_change_pct", "selling_price_change_pct", "volume_change_pct"].forEach(function (n) {
+        var src = form.querySelector('[name="' + n + '"]');
+        var dst = saveForm.querySelector('[name="' + n + '"]');
+        if (src && dst) dst.value = src.value;
+      });
+    });
+    setSaveReady(false);
+  }
+  document.body.addEventListener("htmx:responseError", function () {
+    stage.classList.remove("is-loading");
+    setSaveReady(false);
+    var box = document.getElementById("scenario-result");
+    box.innerHTML = '<div class="lab-state lab-state--err" role="alert"><h2>The calculation did not complete.</h2>' +
+      '<p class="lab-muted">The server returned an error. Your assumptions are unchanged; adjust them or try again. Nothing was saved.</p></div>';
+  });
+  document.body.addEventListener("htmx:sendError", function () {
+    stage.classList.remove("is-loading");
+    setSaveReady(false);
+    var box = document.getElementById("scenario-result");
+    box.innerHTML = '<div class="lab-state lab-state--err" role="alert"><h2>Could not reach the server.</h2>' +
+      '<p class="lab-muted">Check your connection and move a control to retry. No figures are shown because none could be calculated.</p></div>';
+  });
+  document.body.addEventListener("htmx:afterSettle", function () {
+    var box = document.getElementById("scenario-result");
+    if (!box) return;
+    processBars(box);
+    processResult(box);
+    var ev = document.getElementById("evidence-body");
+    if (ev) processResult(ev);
+    setSaveReady(!!box.querySelector("[data-lab-ok]"));
+  });
+
+  /* ---------- evidence drawer ---------- */
+  var drawer = document.getElementById("lab-drawer");
+  var scrim = document.getElementById("lab-scrim");
+  var opener = null;
+  function openDrawer(from) {
+    opener = from || null;
+    drawer.classList.add("is-open"); scrim.classList.add("is-open");
+    drawer.removeAttribute("aria-hidden");
+    document.querySelectorAll("[data-lab-evidence]").forEach(function (b) { b.setAttribute("aria-expanded", "true"); });
+    drawer.querySelector("[data-lab-close]").focus();
+  }
+  function closeDrawer() {
+    drawer.classList.remove("is-open"); scrim.classList.remove("is-open");
+    drawer.setAttribute("aria-hidden", "true");
+    document.querySelectorAll("[data-lab-evidence]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+    if (opener) opener.focus();
+  }
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest("[data-lab-evidence]");
+    if (t) { openDrawer(t); return; }
+    if (e.target.closest("[data-lab-close]") || e.target === scrim) closeDrawer();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && drawer.classList.contains("is-open")) closeDrawer();
+    if (e.key === "Tab" && drawer.classList.contains("is-open")) {
+      var f = drawer.querySelectorAll('button, a[href], input, [tabindex]:not([tabindex="-1"])');
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  /* ---------- compare selection (max 3, min 2) ---------- */
+  var cmpForm = document.getElementById("lab-compare-form");
+  if (cmpForm) {
+    var boxes = cmpForm.querySelectorAll('input[name="ids"]');
+    var go = cmpForm.querySelector("[data-lab-compare-go]");
+    var sync = function () {
+      var n = cmpForm.querySelectorAll('input[name="ids"]:checked').length;
+      boxes.forEach(function (b) { if (!b.checked) b.disabled = n >= 3; });
+      go.disabled = n < 2;
+      go.textContent = n >= 2 ? "Compare " + n + " scenarios" : "Select 2–3 to compare";
+    };
+    boxes.forEach(function (b) { b.addEventListener("change", sync); });
+    sync();
+  }
+
+  /* ---------- save confirmation toast ---------- */
+  var toast = document.getElementById("lab-toast");
+  if (toast && toast.getAttribute("data-show") === "true") {
+    requestAnimationFrame(function () { toast.classList.add("is-on"); });
+    setTimeout(function () { toast.classList.remove("is-on"); }, 3600);
+    if (window.history && history.replaceState) {
+      var u = new URL(window.location.href); u.searchParams.delete("saved");
+      history.replaceState(null, "", u.pathname + (u.search || ""));
+    }
+  }
+})();
+</script>
