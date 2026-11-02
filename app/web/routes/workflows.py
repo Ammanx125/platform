@@ -15,6 +15,7 @@ from app.services.workflows.registry import all_workflows
 from app.services.workflows.registry import get as get_workflow
 from app.web.deps import HtmlUser
 from app.web.templating import base_context, templates
+from app.web.view_helpers import build_timeline
 
 router = APIRouter()
 
@@ -106,5 +107,6 @@ async def instance_detail(
             "user_email": user.email,
             "instance": instance,
             "definition": definition,
+            "timeline": build_timeline(instance),
         },
     )

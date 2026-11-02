@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.dataset import DataSource, IngestionJob
-from app.db.models.semantic import SemanticMapping
+from app.db.models.semantic import CanonicalConcept, SemanticMapping
 from app.db.models.understanding import DataProfile
 from app.db.session import get_db
 from app.web.deps import HtmlUser
@@ -104,10 +104,29 @@ async def dataset_detail(
     mappings = (
         await db.execute(
             select(SemanticMapping)
-            .where(SemanticMapping.source_id == dataset_id)
+            .where(
+                SemanticMapping.source_id == dataset_id,
+                SemanticMapping.tenant_id == user.tenant_id,
+            )
             .order_by(SemanticMapping.source_column)
         )
     ).scalars().all()
+
+    # Display names for the mapped concepts. The catalog is global, so one
+    # query covers every row on the page.
+    concept_keys = {m.canonical_concept_key for m in mappings}
+    concepts: dict[str, CanonicalConcept] = {}
+    if concept_keys:
+        concepts = {
+            c.key: c
+            for c in (
+                await db.execute(
+                    select(CanonicalConcept).where(
+                        CanonicalConcept.key.in_(concept_keys)
+                    )
+                )
+            ).scalars().all()
+        }
 
     latest_profile = None
     if jobs:
@@ -129,6 +148,7 @@ async def dataset_detail(
             "source": source,
             "jobs": jobs,
             "mappings": mappings,
+            "concepts": concepts,
             "profile": latest_profile,
         },
     )

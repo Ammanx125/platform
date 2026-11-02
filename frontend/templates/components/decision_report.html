@@ -1,0 +1,81 @@
+{% if report %}
+<div class="decision-report">
+
+  <h2 class="report-title">{{ report.title }}</h2>
+
+  {% if report.kpi_cards %}
+  <div class="kpi-cards">
+    {% for card in report.kpi_cards %}
+    <div class="kpi-card">
+      <div class="kpi-label">{{ card.label }}</div>
+      <div class="kpi-value">{{ card.value }}{% if card.unit %} <span class="kpi-unit">{{ card.unit }}</span>{% endif %}
+      </div>
+      {% if card.context %}<div class="kpi-context">{{ card.context }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if report.structured %}
+  <div class="structured-report">
+    {% with structured=report.structured %}
+      {% include "reports/_sections.html" %}
+    {% endwith %}
+  </div>
+  {% else %}
+  {% if report.chart and report.chart.kind != "none" and report.chart.values %}
+  <div class="report-chart">
+    <h3 class="report-block-title">{{ report.chart.title }}{% if report.chart.unit %} <span class="kpi-unit">{{
+        report.chart.unit }}</span>{% endif %}</h3>
+    {% set chart_max = report.chart.values | max %}
+    {% set chart_min = report.chart.values | min %}
+    {% set chart_spread = chart_max - chart_min %}
+    {% if chart_spread == 0 %}{% set chart_spread = 1 %}{% endif %}
+    {# Bars grow from the series minimum, so a flat series of large numbers
+    is not drawn as one full-height block. #}
+    <svg class="sparkline" viewBox="0 0 600 80" preserveAspectRatio="none" role="img"
+      aria-label="{{ report.chart.title }}: {{ report.chart.values|length }} points, from {{ " %.4g"|format(chart_min)
+      }} to {{ "%.4g" |format(chart_max) }}">
+      {% set slot = 600 / (report.chart.values | length) %}
+      {% for val in report.chart.values %}
+      {% set height = (val - chart_min) / chart_spread * 76 %}
+      <rect x="{{ " %.2f"|format(loop.index0 * slot) }}" y="{{ " %.2f"|format(80 - height) }}" width="{{ "
+        %.2f"|format([slot - 2, 1] | max) }}" height="{{ " %.2f"|format([height, 1] | max) }}"></rect>
+      {% endfor %}
+    </svg>
+    <div class="report-chart-axis">
+      <span>{{ report.chart.labels[0] if report.chart.labels else "" }}</span>
+      <span>{{ report.chart.labels[-1] if report.chart.labels else "" }}</span>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if report.table and report.table.rows %}
+  <div class="report-table">
+    <h3 class="report-block-title">{{ report.table.title }}</h3>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>{% for c in report.table.columns %}<th>{{ c }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in report.table.rows %}
+          <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+
+  {% if report.limitations %}
+  <div class="report-limitations">
+    <h3 class="report-block-title">What this does not include</h3>
+    <ul>{% for l in report.limitations %}<li>{{ l }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+</div>
+{% endif %}

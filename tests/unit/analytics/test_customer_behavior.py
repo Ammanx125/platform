@@ -25,7 +25,10 @@ async def test_customer_behavior_demo_columns_resolve_to_required_concepts():
             synonyms=synonyms,
             description=description,
         )
-        for key, name, domain, kind, value_type, synonyms, description in ALL_CONCEPTS
+        for (
+            key, name, domain, kind, value_type, synonyms, description,
+            _unit, _currency,
+        ) in ALL_CONCEPTS
     ]
     proposals = await DeterministicMatcher().propose(
         columns=["Customer Name", "Transaction ID", "Transaction Day", "Revenue"],

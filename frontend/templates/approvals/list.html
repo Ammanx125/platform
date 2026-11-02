@@ -18,7 +18,7 @@
   <div class="row-list">
     {% if actions %}
       {% for presentation in actions %}
-        {% with a=presentation.a, recommended_action=presentation.recommended_action, evidence_count=presentation.evidence_count %}
+        {% with a=presentation.a, recommended_action=presentation.recommended_action, evidence_count=presentation.evidence_count, action_timeline=presentation.action_timeline, can_decide=presentation.can_decide %}
           {% include "approvals/_row.html" %}
         {% endwith %}
       {% endfor %}

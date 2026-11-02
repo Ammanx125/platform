@@ -20,16 +20,34 @@
 <article class="brief">
 
   {# --- Question --- #}
-  <section class="brief-section">
-    <div class="brief-section-label">Question</div>
-    <div>{{ decision.query }}</div>
-  </section>
+  {# The report carries the query as its title; the page header already
+     shows it. Avoid stating the same question three times. #}
+  {% if not report %}
+    <section class="brief-section">
+      <div class="brief-section-label">Question</div>
+      <div>{{ decision.query }}</div>
+    </section>
+  {% endif %}
 
   {# --- Conclusion --- #}
   <section class="brief-section">
     <div class="brief-section-label">Conclusion</div>
     <div class="brief-conclusion">{{ decision.llm_summary or "No conclusion was produced." }}</div>
   </section>
+
+  {# --- Structured report (cards, chart, table, limitations) --- #}
+  {# This replaces the raw evidence dump below: the report is built from the
+     same stored evidence, so rendering both would show every KPI and chunk
+     twice. The report's own limitations block covers what the pieces below
+     used to add. #}
+  {# Limitations render even with no cards/chart/table: "we found nothing"
+     is information a manager needs, not an empty section. #}
+  {% if report and (report.kpi_cards or report.chart or report.table or report.limitations) %}
+    <section class="brief-section">
+      <div class="brief-section-label">Report</div>
+      {% include "components/decision_report.html" %}
+    </section>
+  {% endif %}
 
   {# --- Validated claims --- #}
   {% if decision.validated_claims %}
@@ -49,7 +67,10 @@
   {% endif %}
 
   {# --- Evidence --- #}
-  {% if decision.evidence and (decision.evidence.kpis or decision.evidence.anomalies or decision.evidence.forecasts or decision.evidence.workflows or decision.evidence.chunks) %}
+  {# Workflows are not in the report model, so they are the one evidence kind
+     still rendered here. KPIs, anomalies, forecasts and chunks all appear in
+     the report above. #}
+  {% if decision.evidence and decision.evidence.workflows %}
     <section class="brief-section">
       <div class="brief-section-label">Supporting evidence</div>
 

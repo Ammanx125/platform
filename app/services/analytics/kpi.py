@@ -31,6 +31,12 @@ class KPIResult:
     unit: str | None
     value_type: str
     value: float | dict[str, float] | None
+    # From the CanonicalConcept the formula reads, not from the KPI
+    # definition. Its unit is used when the definition is missing or
+    # conflicts with the measure; compatible KPI labels keep their spelling.
+    concept_key: str | None = None
+    description: str | None = None
+    currency: str | None = None
     formula_trace: dict[str, Any] = field(default_factory=dict)
     source_ids: list[uuid.UUID] = field(default_factory=list)
     rows_considered: int = 0
@@ -47,6 +53,47 @@ async def load_kpi(db: AsyncSession, *, key: str) -> KPIDefinition | None:
 async def list_kpis(db: AsyncSession) -> list[KPIDefinition]:
     stmt = select(KPIDefinition).order_by(KPIDefinition.domain, KPIDefinition.key)
     return list((await db.execute(stmt)).scalars().all())
+
+
+def _formula_concept_keys(formula: Any) -> list[str]:
+    """Every concept a formula reads, in first-seen order, deduplicated."""
+    keys: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            concept = node.get("concept")
+            if isinstance(concept, str) and concept not in keys:
+                keys.append(concept)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(formula)
+    return keys
+
+
+def _unit_key(unit: str) -> str:
+    normalized = unit.casefold().replace(" ", "")
+    return {
+        "l/100km": "litres_per_100km",
+        "liters_per_100km": "litres_per_100km",
+        "percent": "percentage",
+        "%": "percentage",
+    }.get(normalized, normalized)
+
+
+def _result_unit(
+    definition_unit: str | None,
+    concept_unit: str | None,
+) -> str | None:
+    """Keep a KPI's display spelling only when it matches the concept measure."""
+    if concept_unit is None:
+        return definition_unit
+    if definition_unit is None or _unit_key(definition_unit) != _unit_key(concept_unit):
+        return concept_unit
+    return definition_unit
 
 
 async def evaluate_kpi(
@@ -83,17 +130,40 @@ async def evaluate_kpi(
 
     try:
         value = evaluate(definition.formula, ctx)
+        formula_concepts = _formula_concept_keys(definition.formula)
+        # A ratio over several concepts has no single measure; label it only
+        # when the formula reads exactly one concept. The concept must also
+        # be mapped in these sources — an unmapped concept has no values, so
+        # labelling the (empty) result with its currency would be misleading.
+        primary = (
+            ctx.concept(formula_concepts[0])
+            if len(formula_concepts) == 1
+            else None
+        )
+        result_unit = _result_unit(
+            definition.unit,
+            primary.unit if primary else None,
+        )
         return KPIResult(
             key=definition.key,
             display_name=definition.display_name,
             domain=definition.domain,
-            unit=definition.unit,
+            unit=result_unit,
             value_type=definition.value_type,
             value=value,
+            concept_key=primary.key if primary else None,
+            description=primary.description if primary else None,
+            currency=primary.currency if primary else None,
             formula_trace={
                 "formula": definition.formula,
                 "rows_considered": len(ctx._rows),  # noqa: SLF001
                 "sources_used": [str(s) for s in ctx.source_ids],
+                "concept_key": primary.key if primary else None,
+                "unit": primary.unit if primary else None,
+                "display_unit": result_unit,
+                "currency": primary.currency if primary else None,
+                "display_name": primary.display_name if primary else None,
+                "description": primary.description if primary else None,
             },
             source_ids=ctx.source_ids,
             rows_considered=len(ctx._rows),  # noqa: SLF001

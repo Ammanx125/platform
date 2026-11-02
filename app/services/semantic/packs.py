@@ -71,6 +71,10 @@ async def _materialize_concepts(
                 c.value_type = spec.get("value_type", c.value_type)
                 c.synonyms = spec.get("synonyms", c.synonyms)
                 c.description = spec.get("description", c.description)
+                # Measure metadata is set explicitly so re-installing a pack
+                # clears a unit the spec no longer declares.
+                c.unit = spec.get("unit")
+                c.currency = spec.get("currency")
             continue
         if "display_name" not in spec:
             missing.append(key)
@@ -83,6 +87,8 @@ async def _materialize_concepts(
             value_type=spec["value_type"],
             synonyms=spec.get("synonyms", []),
             description=spec.get("description"),
+            unit=spec.get("unit"),
+            currency=spec.get("currency"),
         ))
 
     await db.flush()

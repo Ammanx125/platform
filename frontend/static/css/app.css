@@ -1035,6 +1035,256 @@ html[data-theme="dark"] .btn-primary:hover { color: #1c2920; }
 .approval-technical dl { margin-top: var(--space-3); }
 
 /* ==========================================================================
+   Execution timeline
+   Shared by workflow instance detail and approval cards
+   (frontend/templates/workflows/_timeline.html).
+   ========================================================================== */
+
+/* ==========================================================================
+   Decision report
+   Cards + inline SVG chart + table + limitations
+   (frontend/templates/components/decision_report.html).
+   ========================================================================== */
+
+.report-title {
+  font-size: var(--fs-15);
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: var(--space-4);
+}
+
+.kpi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.kpi-card {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.kpi-label {
+  font-size: var(--fs-11);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.kpi-value {
+  margin-top: var(--space-2);
+  font-size: var(--fs-24);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi-unit {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+.kpi-context {
+  margin-top: var(--space-2);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.report-chart,
+.report-table,
+.report-limitations {
+  margin-bottom: var(--space-5);
+}
+
+.report-block-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: var(--space-3);
+}
+
+.structured-report {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.report-section {
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--border-strong);
+}
+
+.report-section.section-summary { border-left-color: var(--accent); }
+.report-section.section-recommendations { border-left-color: var(--success); }
+.report-section.section-limitations { border-left-color: var(--warning); }
+
+.report-section > p {
+  margin-bottom: var(--space-3);
+  color: var(--text-muted);
+}
+
+.report-section .insights {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.report-section .insights li { padding-left: var(--space-1); }
+.insight-causes,
+.insight-impact,
+.insight-rec,
+.insight-evidence {
+  margin-top: var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--fs-13);
+}
+
+.insight-evidence {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.sparkline {
+  display: block;
+  width: 100%;
+  height: 80px;
+  fill: var(--accent);
+}
+
+.sparkline rect { opacity: 0.85; }
+
+.report-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: var(--space-1);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+.report-limitations ul {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.report-limitations li { margin-bottom: var(--space-1); }
+
+.command-metric-currency {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+}
+
+.timeline-item {
+  position: relative;
+  padding-left: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-left: 2px solid var(--border);
+}
+
+.timeline-item:last-child {
+  border-left-color: transparent;
+  padding-bottom: 0;
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -6px;
+  top: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
+.status-complete .timeline-marker { background: var(--success); }
+.status-running  .timeline-marker { background: var(--accent); }
+.status-waiting  .timeline-marker { background: var(--warning); }
+.status-failed   .timeline-marker { background: var(--danger); }
+.status-pending  .timeline-marker { background: var(--border-strong); }
+
+.timeline-body { min-width: 0; }
+
+.timeline-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.timeline-name {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.timeline-badge {
+  font-size: var(--fs-11);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-badge);
+  background: var(--surface-sunk);
+  color: var(--text-muted);
+}
+
+.status-complete .timeline-badge { background: var(--success-soft); color: var(--success); }
+.status-running  .timeline-badge { background: var(--accent-soft);  color: var(--accent); }
+.status-waiting  .timeline-badge { background: var(--warning-soft); color: var(--warning); }
+.status-failed   .timeline-badge { background: var(--danger-soft);  color: var(--danger); }
+
+.timeline-time {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--text-faint);
+}
+
+.timeline-detail {
+  margin-top: var(--space-1);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.timeline-detail summary { cursor: pointer; color: var(--text-faint); }
+.timeline-detail pre {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-11);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.timeline-error {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger-line);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-12);
+}
+
+.timeline-approval {
+  margin-top: var(--space-2);
+  font-size: var(--fs-12);
+  font-weight: 550;
+}
+
+/* ==========================================================================
    18. Login
    ========================================================================== */
 

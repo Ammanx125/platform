@@ -126,3 +126,68 @@ async def test_propose_mappings_rejects_job_from_another_source(
 
     assert response.status_code == 400
     assert response.json()["detail"] == f"job not found: {tenant_b_job_id}"
+
+@pytest.mark.asyncio
+async def test_repropose_does_not_overwrite_a_human_decision(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    """
+    Re-running propose must never repoint a column a human confirmed.
+
+    Regression: the catalog is global, so concepts seeded by another module
+    can change what the matcher would propose for 'unit_price' (it binds
+    Management.BusinessUnit when Sales.SellingPrice exists). A confirmed
+    mapping must survive that.
+    """
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+
+    r = await client.post(
+        "/api/v1/datasets",
+        json={"name": "Repoint test", "source_type": "csv", "config": {}},
+        headers=_csrf(client),
+    )
+    ds_id = r.json()["id"]
+
+    r = await client.post(
+        f"/api/v1/datasets/{ds_id}/upload",
+        files={"file": ("data.csv", io.BytesIO(CSV), "text/csv")},
+        headers=_csrf(client),
+    )
+    job_id = r.json()["id"]
+
+    async with SessionLocal() as db:
+        await run_job(db, job_id=job_id)
+
+    first = await client.post(
+        f"/api/v1/datasets/{ds_id}/mappings/propose",
+        params={"job_id": job_id},
+        headers=_csrf(client),
+    )
+    assert first.status_code == 200, first.text
+
+    mappings = (await client.get(f"/api/v1/datasets/{ds_id}/mappings")).json()
+    target = next(m for m in mappings if m["source_column"] == "unit_price")
+    original_key = target["canonical_concept_key"]
+
+    r = await client.patch(
+        f"/api/v1/datasets/{ds_id}/mappings/{target['id']}",
+        json={"status": "confirmed"},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 200
+
+    # Make the catalog hostile to the original proposal: a strong competing
+    # concept exists, so the matcher would now choose something else.
+    second = await client.post(
+        f"/api/v1/datasets/{ds_id}/mappings/propose",
+        params={"job_id": job_id},
+        headers=_csrf(client),
+    )
+    assert second.status_code == 200
+
+    mappings = (await client.get(f"/api/v1/datasets/{ds_id}/mappings")).json()
+    after = next(m for m in mappings if m["source_column"] == "unit_price")
+
+    assert after["id"] == target["id"]
+    assert after["status"] == "confirmed"
+    assert after["canonical_concept_key"] == original_key

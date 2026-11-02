@@ -62,7 +62,15 @@
         {% for m in mappings %}
           <tr>
             <td class="mono text-xs">{{ m.source_column }}</td>
-            <td>{{ m.canonical_concept_key }}</td>
+            <td>
+              {% set concept = concepts.get(m.canonical_concept_key) %}
+              {% if concept %}
+                <span title="{{ m.canonical_concept_key }}{% if concept.description %} — {{ concept.description }}{% endif %}">{{ concept.display_name }}</span>
+                {% if concept.unit %}<span class="muted text-xs">· {{ concept.currency or concept.unit }}</span>{% endif %}
+              {% else %}
+                {{ m.canonical_concept_key }}
+              {% endif %}
+            </td>
             <td>
               {% if m.status == "confirmed" %}<span class="badge badge-success">{{ m.status }}</span>
               {% elif m.status == "proposed" %}<span class="badge badge-info">{{ m.status }}</span>

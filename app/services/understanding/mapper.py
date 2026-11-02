@@ -90,6 +90,9 @@ async def propose_mappings(
     if not columns:
         return []
 
+    # Every column that already has a mapping in ANY status is skipped, so a
+    # re-proposal never overwrites a human decision. (The unique constraint
+    # is (source_id, source_column), so a second insert would collide anyway.)
     existing_cols: set[str] = set(
         (
             await db.execute(

@@ -6,5 +6,6 @@
     },
     "[python]": {
         "editor.semanticHighlighting.enabled": true
-    }
+    },
+    "CodeGPT.apiKey": "CodeGPT Plus Beta"
 }

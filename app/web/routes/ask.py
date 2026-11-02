@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.services.orchestration import executor
 from app.services.orchestration.context import OrchestratorRequest
+from app.services.orchestration.report_builder import report_from_stored
+from app.services.orchestration.report_store import load_structured_report
 from app.services.workflows.registry import get as get_workflow
 from app.web.deps import HtmlUser
 from app.web.templating import templates
@@ -33,6 +35,11 @@ async def ask(
     row = await executor.persist(db, result=result)
     await db.commit()
     await db.refresh(row)
+    structured_report = await load_structured_report(
+        db,
+        tenant_id=user.tenant_id,
+        decision_run_id=row.id,
+    )
 
     workflow_evidence = (row.evidence or {}).get("workflows") or []
     workflow_presentation = None
@@ -60,5 +67,10 @@ async def ask(
             "validated_claims": row.validated_claims,
             "tool_calls": row.llm_tool_calls,
             "workflow": workflow_presentation,
+            "report": report_from_stored(
+                row.query,
+                row.evidence,
+                structured_report=structured_report,
+            ),
         },
     )

@@ -139,8 +139,10 @@
 
 <section class="command-metrics" aria-label="Business snapshot">
   {% for k in kpis[:3] %}
-    <article class="command-metric">
-      <div class="command-metric-label">{{ k.display_name }}</div>
+    <article class="command-metric"{% if k.description %} title="{{ k.description }}"{% endif %}>
+      <div class="command-metric-label">
+        {{ k.display_name }}{% if k.currency %} <span class="command-metric-currency">({{ k.currency }})</span>{% endif %}
+      </div>
       <div class="command-metric-value">
         {% if k.value is mapping %}
           {{ k.value|length }}<span class="stat-unit">groups</span>

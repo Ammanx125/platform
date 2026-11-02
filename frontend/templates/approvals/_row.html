@@ -37,6 +37,13 @@
       {% endif %}
     </div>
 
+    <section class="recommendation-block">
+      <div class="caption">Timeline</div>
+      {% with timeline=action_timeline %}
+        {% include "workflows/_timeline.html" %}
+      {% endwith %}
+    </section>
+
     {% if a.status == "pending_approval" %}
       <div class="demo-notice" role="note">
         Demo only. Simulating this action will not execute it, change its approval
@@ -47,17 +54,28 @@
         <button class="btn btn-primary" type="button" data-simulate-action>
           Simulate execution
         </button>
+      </div>
+      {% if can_decide %}
+      <div class="btn-row">
         <button class="btn"
                 hx-post="/approvals/{{ a.id }}/approve"
+                hx-headers='{"{{ csrf_header_name }}": "{{ request.cookies.get(csrf_cookie_name) if request.cookies.get(csrf_cookie_name) else "" }}"}'
                 hx-target="#action-{{ a.id }}"
                 hx-swap="outerHTML swap:120ms settle:120ms"
                 hx-disabled-elt="this">Approve and execute</button>
         <button class="btn btn-danger"
                 hx-post="/approvals/{{ a.id }}/reject"
+                hx-headers='{"{{ csrf_header_name }}": "{{ request.cookies.get(csrf_cookie_name) if request.cookies.get(csrf_cookie_name) else "" }}"}'
                 hx-target="#action-{{ a.id }}"
                 hx-swap="outerHTML swap:120ms settle:120ms"
                 hx-disabled-elt="this">Reject</button>
       </div>
+      {% else %}
+      <div class="demo-notice" role="note" data-maker-checker>
+        You proposed this action. Another approver must approve or reject it;
+        you cannot decide your own proposal.
+      </div>
+      {% endif %}
     {% endif %}
 
     <details class="approval-technical">

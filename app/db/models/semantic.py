@@ -38,6 +38,16 @@ class CanonicalConcept(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     Key format: '<Domain>.<Name>' — e.g. 'Procurement.Supplier',
     'Finance.Revenue'. Convention only; not parsed.
+
+    unit describes the measure of a concept's values, independent of how a
+    KPI formats them:
+      - 'currency' | 'litres' | 'days' | 'count' | 'percentage'
+      - 'litres_per_100km' and other composite rates
+      - None when the concept is not a measurable quantity (entities, IDs)
+
+    currency is the three-letter code (e.g. 'ETB') and is only meaningful
+    when unit == 'currency'. A concept with unit='currency' and no currency
+    is incomplete: the value cannot be labelled with a denomination.
     """
     __tablename__ = "canonical_concepts"
 
@@ -48,6 +58,9 @@ class CanonicalConcept(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
     value_type: Mapped[str] = mapped_column(String(20), nullable=False)
     synonyms: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+
+    unit: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
 
 class SemanticMapping(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):

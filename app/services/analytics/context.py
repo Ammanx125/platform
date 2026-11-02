@@ -30,7 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.dataset import StagedRow
-from app.db.models.semantic import SemanticMapping
+from app.db.models.semantic import CanonicalConcept, SemanticMapping
 
 
 def _to_float(value: Any) -> float | None:
@@ -59,6 +59,16 @@ def _key_of(value: Any) -> str:
     if value is None:
         return ""
     return str(value)
+
+
+@dataclass(frozen=True)
+class ConceptMetadata:
+    """Catalog metadata for a concept, independent of any KPI definition."""
+    key: str
+    display_name: str
+    description: str | None
+    unit: str | None
+    currency: str | None
 
 
 @dataclass
@@ -104,16 +114,20 @@ class EvaluationContext:
         rows: list[dict[str, Any]],
         column_map: dict[uuid.UUID, dict[str, str]],
         source_ids: list[uuid.UUID],
+        concepts: dict[str, ConceptMetadata] | None = None,
     ) -> None:
         """
         rows:       the union of StagedRow.raw_data across all sources, plus
                     a synthetic `__source_id` key on each row.
         column_map: {source_id: {concept_key: column_name}}
         source_ids: the sources included in this context, in a stable order.
+        concepts:   {concept_key: ConceptMetadata} for every concept mapped
+                    in these sources. Empty when no concepts were loaded.
         """
         self._rows = rows
         self._column_map = column_map
         self._source_ids = source_ids
+        self._concepts = concepts or {}
 
     @classmethod
     async def load(
@@ -159,6 +173,29 @@ class EvaluationContext:
         for m in map_rows:
             column_map.setdefault(m.source_id, {})[m.canonical_concept_key] = m.source_column
 
+        # Load the concepts behind those mappings once, so callers can
+        # label a value ("Revenue (ETB)") without a second query.
+        concept_keys = {m.canonical_concept_key for m in map_rows}
+        concepts: dict[str, ConceptMetadata] = {}
+        if concept_keys:
+            concept_rows = (
+                await db.execute(
+                    select(CanonicalConcept).where(
+                        CanonicalConcept.key.in_(concept_keys)
+                    )
+                )
+            ).scalars().all()
+            concepts = {
+                c.key: ConceptMetadata(
+                    key=c.key,
+                    display_name=c.display_name,
+                    description=c.description,
+                    unit=c.unit,
+                    currency=c.currency,
+                )
+                for c in concept_rows
+            }
+
         # Load staged rows. `__source_id` is injected so operations can
         # attribute values back to a source when needed.
                 # Load staged rows. `__source_id` is injected so operations can
@@ -182,11 +219,20 @@ class EvaluationContext:
             row["__source_id"] = str(s.source_id)
             rows.append(row)
 
-        return cls(rows=rows, column_map=column_map, source_ids=resolved_sources)
+        return cls(
+            rows=rows,
+            column_map=column_map,
+            source_ids=resolved_sources,
+            concepts=concepts,
+        )
 
     @property
     def source_ids(self) -> list[uuid.UUID]:
         return list(self._source_ids)
+
+    def concept(self, concept_key: str) -> ConceptMetadata | None:
+        """Catalog metadata for a mapped concept, or None if it isn't here."""
+        return self._concepts.get(concept_key)
 
     def values_for(
         self,

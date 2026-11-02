@@ -53,6 +53,7 @@ PACKS: list[dict] = [
                     "procurement_spend", "purchase_total",
                 ],
                 "description": "The total monetary amount of a customer or supplier purchase.",
+                "unit": "currency",
             },
             # A pack-only concept: not in the base catalog.
             {
@@ -216,6 +217,7 @@ PACKS: list[dict] = [
                 "value_type": "number",
                 "synonyms": ["occupied_hours", "active_hours", "hours_in_service"],
                 "description": "Hours of scheduled capacity actually used.",
+                "unit": "hours",
             },
             {
                 "key": "Transport.Vehicle",
@@ -225,6 +227,7 @@ PACKS: list[dict] = [
                 "value_type": "entity",
                 "synonyms": ["vehicle", "vehicle_id", "vehicle_ref", "bus", "bus_id"],
                 "description": "A vehicle used to provide transport services.",
+                "unit": None,
             },
             {
                 "key": "Transport.Route",
@@ -234,6 +237,7 @@ PACKS: list[dict] = [
                 "value_type": "entity",
                 "synonyms": ["route", "route_name", "route_code", "service_route"],
                 "description": "A defined path or service operated by the fleet.",
+                "unit": None,
             },
             {
                 "key": "Transport.PassengerCount",
@@ -243,6 +247,7 @@ PACKS: list[dict] = [
                 "value_type": "number",
                 "synonyms": ["passengers", "passenger_count", "riders", "rider_count"],
                 "description": "The number of passengers carried.",
+                "unit": "count",
             },
             {
                 "key": "Transport.DistanceKm",
@@ -252,6 +257,7 @@ PACKS: list[dict] = [
                 "value_type": "number",
                 "synonyms": ["distance_km", "distance", "kilometres", "kilometers"],
                 "description": "Distance travelled, measured in kilometres.",
+                "unit": "kilometres",
             },
             {
                 "key": "Transport.FuelConsumed",
@@ -261,6 +267,7 @@ PACKS: list[dict] = [
                 "value_type": "number",
                 "synonyms": ["fuel_litres", "fuel_liters", "litres_used", "liters_used"],
                 "description": "Fuel consumed by a vehicle over a reporting period.",
+                "unit": "litres",
             },
             {
                 "key": "Transport.FuelUseRate",
@@ -270,6 +277,7 @@ PACKS: list[dict] = [
                 "value_type": "number",
                 "synonyms": ["fuel_use_rate", "litres_per_100km", "liters_per_100km"],
                 "description": "Fuel consumed per 100 kilometres.",
+                "unit": "litres_per_100km",
             },
             {
                 "key": "Transport.TravelMinutes",
@@ -279,6 +287,7 @@ PACKS: list[dict] = [
                 "value_type": "number",
                 "synonyms": ["travel_minutes", "journey_minutes", "trip_duration_minutes"],
                 "description": "Elapsed travel time for a route service.",
+                "unit": "minutes",
             },
         ],
         "relationships": [

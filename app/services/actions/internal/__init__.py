@@ -3,12 +3,13 @@
 from importlib import import_module
 
 for _module_name in (
-        "generate_report",
-        "list_anomalies",
-        "list_suppliers",
-        "supplier_detail",
-        "list_inbox",
-        "draft_email",
-        "send_email",
+    "generate_report",
+    "generate_structured_report",
+    "list_anomalies",
+    "list_suppliers",
+    "supplier_detail",
+    "list_inbox",
+    "draft_email",
+    "send_email",
 ):
-        import_module(f"{__name__}.{_module_name}")
+    import_module(f"{__name__}.{_module_name}")

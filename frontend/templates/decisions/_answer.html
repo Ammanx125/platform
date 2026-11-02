@@ -62,6 +62,13 @@
       </section>
     {% endif %}
 
+    {% if report and (report.structured or report.kpi_cards or report.chart or report.table or report.limitations) %}
+      <section class="brief-section">
+        <div class="brief-section-label">Report</div>
+        {% include "components/decision_report.html" %}
+      </section>
+    {% endif %}
+
     {% if validated_claims %}
       <section class="brief-section">
         <div class="brief-section-label">Why this is believed</div>

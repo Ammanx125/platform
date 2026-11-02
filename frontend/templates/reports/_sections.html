@@ -1,0 +1,28 @@
+<!-- Section renderer for a StructuredReport.
+
+     Expects `structured` in scope: an object with a `.sections` list.
+     Shared by the decision page (components/decision_report.html) and the
+     standalone printable report (reports/report.html) so a section looks
+     identical wherever it appears. -->
+{% for section in structured.sections %}
+<section class="report-section section-{{ section.section_type }}">
+  <h3 class="report-block-title">{{ section.title }}</h3>
+  {% if section.body %}<p>{{ section.body }}</p>{% endif %}
+  {% if section.insights %}
+  <ul class="insights">
+    {% for insight in section.insights %}
+    <li>
+      <strong>{{ insight.observation }}</strong>
+      {% if insight.possible_causes %}<div class="insight-causes">Possible causes: {{ insight.possible_causes }}</div>{%
+      endif %}
+      {% if insight.business_impact %}<div class="insight-impact">Impact: {{ insight.business_impact }}</div>{% endif %}
+      {% if insight.recommendation %}<div class="insight-rec">Recommendation: {{ insight.recommendation }}</div>{% endif
+      %}
+      {% if insight.evidence_ids %}<div class="insight-evidence">Evidence: {{ insight.evidence_ids|join(", ") }}</div>{%
+      endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endfor %}

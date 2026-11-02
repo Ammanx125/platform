@@ -157,6 +157,8 @@ class KPICapability:
                     "display_name": result.display_name,
                     "domain": result.domain,
                     "unit": result.unit,
+                    "currency": getattr(result, "currency", None),
+                    "description": getattr(result, "description", None),
                     "value": result.value,
                     "rows_considered": result.rows_considered,
                 },
@@ -165,13 +167,36 @@ class KPICapability:
 
 
 def _render_kpi_text(result: Any) -> str:
+    """
+    One line of KPI evidence.
+
+    The label prefers the KPI's display name over the underlying concept's,
+    so existing evidence text is unchanged when a concept has no metadata.
+    Currency and description come from the concept the formula reads.
+    """
+    display_name = getattr(result, "display_name", None) or getattr(
+        result, "key", "KPI"
+    )
+    currency = getattr(result, "currency", None)
+    description = getattr(result, "description", None)
+
+    label = f"{display_name} ({currency})" if currency else display_name
     if isinstance(result.value, dict):
         top = sorted(result.value.items(), key=lambda kv: kv[1], reverse=True)[:5]
         parts = ", ".join(f"{k}: {v:g}" for k, v in top)
-        return f"{result.display_name}: {parts}"
-    if result.value is None:
-        return f"{result.display_name}: (no value)"
-    return f"{result.display_name}: {result.value:g} {result.unit or ''}".strip()
+        text = f"{label}: {parts}"
+    elif result.value is None:
+        text = f"{label}: (no value)"
+    else:
+        # A concept's unit of 'currency' is a domain marker, not a suffix:
+        # the denomination already appears in the label as "(ETB)".
+        unit = result.unit
+        unit_text = "" if unit in (None, "currency") else unit
+        text = f"{label}: {result.value:g} {unit_text}".strip()
+
+    if description:
+        text = f"{text} — {description}"
+    return text
 
 
 async def _infer_kpi_keys(db: AsyncSession, query: str) -> list[str]:

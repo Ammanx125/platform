@@ -1,0 +1,44 @@
+<!-- Shared execution timeline. Expects `timeline`: rows from
+     app/web/view_helpers.py (build_timeline / build_action_timeline). -->
+{% if timeline %}
+<ol class="timeline">
+  {% for step in timeline %}
+  <li class="timeline-item status-{{ step.status }}"{% if step.is_approval %} data-timeline-approval{% endif %}>
+    <div class="timeline-marker" aria-hidden="true"></div>
+    <div class="timeline-body">
+      <div class="timeline-header">
+        <span class="timeline-name">{{ step.name }}</span>
+        <span class="timeline-badge">{{ step.status }}</span>
+        {% if step.timestamp %}
+          {% if step.timestamp is string %}
+        <span class="timeline-time">{{ step.timestamp }}</span>
+          {% else %}
+        <span class="timeline-time">{{ step.timestamp.strftime("%Y-%m-%d %H:%M") }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      {% if step.detail is string %}
+      <div class="timeline-detail">{{ step.detail }}</div>
+      {% elif step.json %}
+      <div class="timeline-detail">
+        <details>
+          <summary>output</summary>
+          <pre>{{ step.detail | tojson(indent=2) }}</pre>
+        </details>
+      </div>
+      {% endif %}
+      {% if step.error %}
+      <div class="timeline-error">{{ step.error }}</div>
+      {% endif %}
+      {% if step.is_approval %}
+      <div class="timeline-approval">
+        <a href="{{ step.href or '/approvals' }}">Review and approve</a>
+      </div>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{% else %}
+<p class="muted">No steps recorded yet.</p>
+{% endif %}

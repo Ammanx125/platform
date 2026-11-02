@@ -37,39 +37,8 @@
 </section>
 
 <section class="section panel">
-  <header class="section-header"><h2 class="section-title">Steps</h2></header>
-  <div class="table-wrap">
-    <table class="table">
-      <thead>
-        <tr><th>Step</th><th>Type</th><th>Status</th><th>Output</th></tr>
-      </thead>
-      <tbody>
-      {% for s in instance.step_states %}
-        <tr>
-          <td class="mono text-xs">{{ s.name }}</td>
-          <td><span class="badge badge-neutral">{{ s.type }}</span></td>
-          <td>
-            {% if s.status == "completed" %}<span class="badge badge-success">{{ s.status }}</span>
-            {% elif s.status == "failed" %}<span class="badge badge-danger">{{ s.status }}</span>
-            {% elif s.status == "waiting" %}<span class="badge badge-warning">{{ s.status }}</span>
-            {% elif s.status == "running" %}<span class="badge badge-info">{{ s.status }}</span>
-            {% else %}<span class="badge badge-neutral">{{ s.status }}</span>{% endif %}
-          </td>
-          <td class="text-xs muted">
-            {% if s.error %}
-              <div class="alert alert-danger text-xs" style="margin:0;">{{ s.error }}</div>
-            {% elif s.output %}
-              <details>
-                <summary>output</summary>
-                <pre>{{ s.output | tojson(indent=2) }}</pre>
-              </details>
-            {% else %}<span class="faint">—</span>{% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <header class="section-header"><h2 class="section-title">Execution timeline</h2></header>
+  {% include "workflows/_timeline.html" %}
 </section>
 
 {% if instance.workflow_context %}

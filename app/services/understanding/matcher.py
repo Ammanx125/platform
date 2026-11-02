@@ -66,15 +66,69 @@ _EXACT = 100.0
 _STRONG = 90.0
 _WEAK = 75.0
 
+# A candidate that equals one whitespace/underscore-delimited part of the
+# column name is a component match, not a full-name match, and must not be
+# scored as _EXACT. It sits just below a full fuzzy match so that a genuine
+# whole-name match always wins, while still beating weak fuzzy noise.
+_COMPONENT = _STRONG
+
+# Short candidate strings are dangerous: 'unit' and 'id' are substrings of
+# many unrelated column names, and 'unit' is itself a synonym of some
+# BusinessUnit concepts. A candidate this many characters or shorter only
+# counts when it matches the column name exactly.
+_COMPONENT_MIN_LEN = 4
+
+
+def _score_match(
+    norm: str,
+    parts: set[str],
+    cand: str,
+    cand_parts: frozenset[str],
+) -> float:
+    """
+    Score one column name against one candidate (both normalized).
+
+    A whole-name match — exact or fuzzy — always outranks a match that only
+    lines up one word, and short candidates only ever match exactly.
+    """
+    if norm == cand:
+        return _EXACT
+
+    whole = float(fuzz.ratio(norm, cand))
+    is_part = cand in parts or cand_parts <= parts
+
+    # A short candidate may only ever match the entire column name. Letting
+    # 'unit' (4 chars) fuzzy-compare against 'unit_price' both loses the true
+    # match and produces noise ('unit' scores 90 against 'unitprice').
+    if len(cand) <= _COMPONENT_MIN_LEN:
+        return 0.0
+
+    if is_part:
+        # Partial credit: at least _COMPONENT, but a strong fuzzy whole-name
+        # score is kept if it is higher.
+        return max(_COMPONENT, whole)
+
+    return whole
+
 
 class DeterministicMatcher:
     """
     Deterministic matcher: exact, then fuzzy, then give up.
 
-    Priority:
-      1. Exact match on a concept's synonym or display name (normalized).
-      2. Fuzzy match >= _STRONG against any synonym or display name.
-      3. Fuzzy match >= _WEAK  against any synonym or display name.
+    Priority (highest score wins):
+      1. _EXACT      the column name equals a synonym/display name in full
+                     ('unit price' == 'unit price').
+      2. fuzzy 90+   close whole-name match ('suppliers' ~ 'supplier').
+      3. _COMPONENT  the candidate equals one part of a multi-word column
+                     ('price' in 'unit_price'), or a short candidate that
+                     matches the whole name.
+      4. fuzzy 75+   weak whole-name match.
+
+    Matched-only-as-one-part is deliberately weaker than a whole-name
+    match, and very short candidates ('unit', 'id') are restricted to
+    whole-name equality. Without this, 'unit_price' scored 100 against a
+    BusinessUnit concept whose synonym is 'unit', beating the concept with
+    the true synonym 'unit_price'.
 
     Each column maps to at most one concept — the highest-scoring one.
     """
@@ -87,19 +141,20 @@ class DeterministicMatcher:
     ) -> list[MappingProposal]:
         proposals: list[MappingProposal] = []
 
-        # Pre-compute normalized candidate strings per concept.
-        concept_candidates: list[tuple[CanonicalConcept, list[str]]] = []
+        # A candidate is matched both as a normalized string and as a set of
+        # its own parts, so 'unit price' can match 'unit_price' as a whole
+        # rather than only via its synonym list.
+        concept_candidates: list[tuple[CanonicalConcept, list[tuple[str, frozenset[str]]]]] = []
         for c in concepts:
-            raw_candidates = [normalize_column_name(c.display_name)]
-            raw_candidates.extend(
-                normalize_column_name(s) for s in (c.synonyms or [])
-            )
+            raw_candidates = [c.display_name, *(c.synonyms or [])]
             seen: set[str] = set()
-            deduped: list[str] = []
-            for cand in raw_candidates:
-                if cand and cand not in seen:
-                    seen.add(cand)
-                    deduped.append(cand)
+            deduped: list[tuple[str, frozenset[str]]] = []
+            for raw in raw_candidates:
+                cand = normalize_column_name(raw)
+                if not cand or cand in seen:
+                    continue
+                seen.add(cand)
+                deduped.append((cand, frozenset(_normalized_parts(raw))))
             concept_candidates.append((c, deduped))
 
         for col in columns:
@@ -113,11 +168,8 @@ class DeterministicMatcher:
             best_matched: str | None = None
 
             for concept, candidates in concept_candidates:
-                for cand in candidates:
-                    if norm == cand or cand in exact_parts:
-                        score = _EXACT
-                    else:
-                        score = float(fuzz.ratio(norm, cand))
+                for cand, cand_parts in candidates:
+                    score = _score_match(norm, exact_parts, cand, cand_parts)
                     if score > best_score:
                         best_score = score
                         best_concept = concept

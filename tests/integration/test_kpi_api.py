@@ -3,6 +3,7 @@ import io
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app.db.seed_concepts import seed_canonical_concepts
 from app.db.seed_kpis import seed_kpis
@@ -118,3 +119,103 @@ async def test_kpi_404_for_unknown(client: AsyncClient, two_tenants: dict) -> No
     await _seed_and_ingest(client, two_tenants)
     r = await client.get("/api/v1/analytics/kpis/does.not.exist")
     assert r.status_code == 404
+
+@pytest.mark.asyncio
+async def test_kpi_carries_concept_metadata(procurement_tenant) -> None:
+    """display_name/unit/currency come from the concept the formula reads."""
+    from app.services.analytics.kpi import evaluate_kpi
+
+    tenants, source_id = procurement_tenant
+
+    async with SessionLocal() as db:
+        result = await evaluate_kpi(
+            db,
+            key="procurement.total_spend",
+            tenant_id=tenants["tenant_a"],
+            source_ids=[source_id],
+        )
+
+    assert result.error is None
+    assert result.concept_key == "Procurement.PurchasePrice"
+    assert result.currency is None
+    assert result.description
+
+    trace = result.formula_trace
+    assert trace["concept_key"] == "Procurement.PurchasePrice"
+    assert trace["unit"] == "currency"
+    assert trace["currency"] is None
+    assert trace["display_name"] == "Purchase Price"
+    assert trace["description"] == result.description
+    # The pre-existing trace keys are still present.
+    assert set(trace) >= {"formula", "rows_considered", "sources_used"}
+
+
+@pytest.mark.asyncio
+async def test_kpi_evidence_text_labels_currency_and_explains(
+    procurement_tenant,
+) -> None:
+    from app.services.analytics.kpi import evaluate_kpi
+    from app.services.orchestration.capabilities import _render_kpi_text
+
+    tenants, source_id = procurement_tenant
+
+    async with SessionLocal() as db:
+        result = await evaluate_kpi(
+            db,
+            key="procurement.total_spend",
+            tenant_id=tenants["tenant_a"],
+            source_ids=[source_id],
+        )
+
+    text = _render_kpi_text(result)
+    # Currency is not inferred from global concept metadata.
+    assert text.startswith("Total Procurement Spend: ")
+    assert "(ETB)" not in text
+    assert " — " in text
+    assert text.endswith(result.description)
+
+
+@pytest.mark.asyncio
+async def test_multi_concept_ratio_has_no_single_currency(
+    procurement_tenant,
+) -> None:
+    """A ratio over two concepts is not an amount of money."""
+    from app.db.models.analytics import KPIDefinition
+    from app.services.analytics.kpi import evaluate_kpi
+
+    tenants, source_id = procurement_tenant
+
+    async with SessionLocal() as db:
+        db.add(
+            KPIDefinition(
+                key="test.spend_per_unit",
+                display_name="Spend per Unit",
+                domain="Procurement",
+                value_type="number",
+                formula={
+                    "op": "ratio",
+                    "numerator": {"op": "sum", "concept": "Procurement.PurchasePrice"},
+                    "denominator": {"op": "sum", "concept": "Common.Quantity"},
+                },
+            )
+        )
+        await db.commit()
+
+        result = await evaluate_kpi(
+            db,
+            key="test.spend_per_unit",
+            tenant_id=tenants["tenant_a"],
+            source_ids=[source_id],
+        )
+
+        assert result.currency is None
+        assert result.concept_key is None
+        assert result.formula_trace["currency"] is None
+
+        definition = (
+            await db.execute(
+                select(KPIDefinition).where(KPIDefinition.key == "test.spend_per_unit")
+            )
+        ).scalar_one()
+        await db.delete(definition)
+        await db.commit()

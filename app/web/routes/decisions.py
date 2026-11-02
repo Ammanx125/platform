@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.decision import DecisionRun
 from app.db.session import get_db
+from app.services.orchestration.report_builder import report_from_stored
+from app.services.orchestration.report_store import load_structured_report
 from app.web.deps import HtmlUser
 from app.web.templating import base_context, templates
 
@@ -63,6 +65,17 @@ async def decision_detail(
     if row is None:
         raise HTTPException(status_code=404, detail="decision not found")
 
+    structured_report = await load_structured_report(
+        db,
+        tenant_id=user.tenant_id,
+        decision_run_id=row.id,
+    )
+    report = report_from_stored(
+        row.query,
+        row.evidence,
+        structured_report=structured_report,
+    )
+
     return templates.TemplateResponse(
         request,
         "decisions/detail.html",
@@ -73,5 +86,6 @@ async def decision_detail(
             "tenant_name": str(user.tenant_id),
             "user_email": user.email,
             "decision": row,
+            "report": report,
         },
     )

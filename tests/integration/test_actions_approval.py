@@ -112,3 +112,34 @@ async def test_reject_own_action_is_rejected(
     )
     assert r.status_code == 409
     assert "cannot reject their own action" in r.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_approval_page_shows_action_timeline(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+    await _seed_pending_action(two_tenants["tenant_a"], two_tenants["user_a"])
+
+    response = await client.get("/approvals")
+
+    assert response.status_code == 200
+    assert 'class="timeline"' in response.text
+    assert "Proposed" in response.text
+    assert "Approval pending" in response.text
+    assert "status-waiting" in response.text
+    assert "Review and approve" in response.text
+
+
+@pytest.mark.asyncio
+async def test_approval_row_hides_decision_buttons_from_proposer(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    """Maker-checker: the proposer sees why they can't decide, not buttons."""
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+    await _seed_pending_action(two_tenants["tenant_a"], two_tenants["user_a"])
+
+    response = await client.get("/approvals")
+
+    assert response.status_code == 200
+    assert "you cannot decide your own proposal" in response.text
+    assert 'hx-post="/approvals/' not in response.text
