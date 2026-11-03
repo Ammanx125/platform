@@ -10,8 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentTenantId, require_permission
 from app.db.models.user import User
 from app.db.session import get_db
-from app.services.browser import service as browser_service
-from app.services.browser.service import BrowserServiceError
 from app.schemas.browser import (
     BrowserAuthorizationCreate,
     BrowserAuthorizationRead,
@@ -20,6 +18,8 @@ from app.schemas.browser import (
     BrowserExtractionRunRead,
     ScheduleExtractionResponse,
 )
+from app.services.browser import service as browser_service
+from app.services.browser.service import BrowserServiceError
 
 router = APIRouter(prefix="/browser", tags=["browser"])
 
@@ -211,8 +211,8 @@ async def list_runs(
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     _user: Annotated[User, Depends(require_permission("dataset:read"))],
-    profile_id: uuid.UUID | None = Query(default=None),
-    limit: int = Query(default=50, ge=1, le=200),
+    profile_id: Annotated[uuid.UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> list[BrowserExtractionRunRead]:
     rows = await browser_service.list_runs(
         db, tenant_id=tenant_id, profile_id=profile_id, limit=limit,

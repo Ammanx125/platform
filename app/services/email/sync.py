@@ -105,17 +105,20 @@ async def sync_email_account(
 
     classifier = get_classifier()
     created = 0
+    failed_message_ids: list[str] = []
     for message_id in message_ids:
         try:
             fetched = await provider.get_message(
                 tokens=tokens, message_id=message_id
             )
         except EmailProviderError as exc:
-            # One bad message must not sink the whole sync.
+            # One bad message must not sink the whole sync — but it must not
+            # be silently skipped either (see the cursor note below).
             lineage_row.errors = list(lineage_row.errors or []) + [{
                 "message_id": message_id,
                 "error": f"get_message failed: {exc}",
             }]
+            failed_message_ids.append(message_id)
             continue
 
         # Idempotency: skip if a Document for this message_id already
@@ -151,15 +154,32 @@ async def sync_email_account(
         )
         created += 1
 
-    # Advance cursor and sync metadata. Even a partial sync advances the
-    # cursor: we've handled what we can, and re-running would duplicate
-    # work on the messages that already succeeded.
-    if next_cursor is not None:
-        account.sync_cursor = next_cursor
-        account.sync_cursor_updated_at = _now()
+    # Advance cursor and sync metadata.
+    #
+    # The cursor is NOT advanced when any message in the batch failed to
+    # fetch. Advancing it would move the provider's window past those
+    # messages, converting a temporary API failure into permanent data
+    # loss: the next sync would never revisit them. Re-processing the
+    # batch is safe because completed messages are skipped by the
+    # message_id check above.
+    #
+    # The failed ids are recorded so a retry pass can target them without
+    # re-listing the whole mailbox.
+    if failed_message_ids:
+        lineage_row.errors = list(lineage_row.errors or []) + [{
+            "pending_retry_message_ids": failed_message_ids,
+        }]
+        account.last_error = (
+            f"{len(failed_message_ids)} message(s) could not be fetched; "
+            "the sync cursor was held back so they are retried next run"
+        )
+    else:
+        if next_cursor is not None:
+            account.sync_cursor = next_cursor
+            account.sync_cursor_updated_at = _now()
+        account.last_error = None
     account.last_sync_at = _now()
-    account.status = "active"
-    account.last_error = None
+    account.status = "active" if not failed_message_ids else "error"
 
     lineage_row.source_uri = f"{account.provider}:{account.email_address}"
     lineage_row.source_cursor = account.sync_cursor

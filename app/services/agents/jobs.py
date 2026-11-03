@@ -12,7 +12,7 @@ Claiming and completing jobs is called from the agent endpoints.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,9 +32,14 @@ class JobError(Exception):
 MAX_RETRIES = 3
 
 # After this many seconds, an in_progress job is considered abandoned and
-# can be re-claimed. A future worker task enforces this; for now the value
-# lives here so the endpoint can decide whether to allow reclaim.
+# can be re-claimed. An agent whose machine shuts down after claiming a job
+# leaves it in_progress forever otherwise: claim_pending_jobs() only ever
+# looks at pending rows. claim_pending_jobs() enforces this on every call,
+# so recovery needs no separate worker task.
 IN_PROGRESS_TIMEOUT_SECONDS = 300
+
+# The status an abandoned or failed job lands in before it is retried.
+JOB_ABANDONED = "abandoned"
 
 
 # ---------- creating jobs ----------
@@ -100,6 +105,50 @@ async def create_rescan_job(
 
 # ---------- claiming and completing ----------
 
+async def _reclaim_abandoned_jobs(
+    db: AsyncSession, *, agent: Agent
+) -> list[uuid.UUID]:
+    """
+    Requeue or fail jobs whose claim expired.
+
+    A claim is a lease, not ownership: if the agent never reports back, the
+    job must become claimable again or be recorded as failed. Returns the
+    ids of jobs that were requeued.
+    """
+    cutoff = datetime.now(UTC) - timedelta(seconds=IN_PROGRESS_TIMEOUT_SECONDS)
+
+    stale = (
+        await db.execute(
+            select(AgentJob).where(
+                AgentJob.agent_id == agent.id,
+                AgentJob.status == "in_progress",
+                AgentJob.claimed_at.is_not(None),
+                AgentJob.claimed_at < cutoff,
+            )
+        )
+    ).scalars().all()
+
+    requeued: list[uuid.UUID] = []
+    for job in stale:
+        if job.retry_count >= MAX_RETRIES:
+            # Out of attempts: fail it so it is visible and stops churning.
+            job.status = "failed"
+            job.error = (
+                f"abandoned by the agent after {job.retry_count} attempt(s)"
+            )
+            job.claimed_at = None
+            continue
+        job.status = "pending"
+        job.retry_count = job.retry_count + 1
+        job.claimed_at = None
+        job.error = "re-queued after the previous claim expired"
+        requeued.append(job.id)
+
+    if stale:
+        await db.flush()
+    return requeued
+
+
 async def claim_pending_jobs(
     db: AsyncSession, *, agent: Agent, limit: int = 20
 ) -> list[AgentJob]:
@@ -109,7 +158,14 @@ async def claim_pending_jobs(
     Uses a single UPDATE ... WHERE id IN (...) RETURNING to avoid races
     when multiple iterations of the same agent (or a retried request)
     try to claim the same jobs.
+
+    Also reclaims jobs abandoned by this agent: an in_progress row whose
+    claimed_at is older than IN_PROGRESS_TIMEOUT_SECONDS is treated as a
+    lost claim (the customer's machine went away mid-job). It is requeued
+    if retries remain, otherwise marked failed so it stops being picked up
+    and becomes visible as a failure instead of a permanent orphan.
     """
+    await _reclaim_abandoned_jobs(db, agent=agent)
     # Find candidate ids without locking, then claim atomically.
     candidate_ids = [
         row[0]

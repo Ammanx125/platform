@@ -123,11 +123,15 @@ async def build_series(
     # 3. Load rows.
     # Same snapshot scoping as analytics context: only active snapshot
     # rows for replace_active sources; append sources unchanged.
-    from app.services.datasets.scope import active_snapshot_filter
+    from app.services.datasets.scope import (
+        active_snapshot_filter,
+        deleted_snapshot_filter,
+    )
 
     scope_clauses = await active_snapshot_filter(
         db, tenant_id=tenant_id, source_ids=resolved_sources,
     )
+    scope_clauses += await deleted_snapshot_filter(db, tenant_id=tenant_id)
     rows = (
         await db.execute(
             select(StagedRow)

@@ -102,3 +102,18 @@ class ActionRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # Stable key for the side effect this action performs. Derived from the
+    # action id plus the arguments it was approved with, so a retry or a
+    # concurrent approver resolves to the SAME key and the provider can
+    # deduplicate (or Sansa can recognise its own earlier attempt).
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, unique=True, index=True
+    )
+
+    # How many times execution has been attempted. Incremented BEFORE the
+    # external call so a crash mid-send leaves the count behind, making the
+    # attempt visible rather than invisible.
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )

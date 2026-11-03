@@ -31,12 +31,44 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.models.browser import BrowserExtractionProfile
-from app.db.models.dataset import DataSource, StagedRow
+from app.db.models.dataset import DataSource, IngestionJob, StagedRow
+from app.db.models.timestamps import FileObservation
+
+
+async def deleted_snapshot_filter(
+    db: AsyncSession, *, tenant_id: uuid.UUID
+) -> list[ColumnElement[bool]]:
+    """
+    Exclude rows whose source file has been tombstoned as deleted.
+
+    A deleted file must stop powering analytics. The customer may have
+    removed it precisely because it was wrong; continuing to derive KPIs
+    from it makes the platform assert numbers nobody can see or correct.
+
+    Only observations that record an ingestion job are considered: a
+    metadata-only observation never produced rows, and treating it as
+    deleted would hide nothing.
+    """
+    deleted_job_ids = (
+        await db.execute(
+            select(FileObservation.ingestion_job_id)
+            .where(
+                FileObservation.tenant_id == tenant_id,
+                FileObservation.status == "deleted",
+                FileObservation.ingestion_job_id.is_not(None),
+            )
+        )
+    ).scalars().all()
+
+    if not deleted_job_ids:
+        return []
+    return [~StagedRow.job_id.in_(list(deleted_job_ids))]
 
 
 class SnapshotScopeError(Exception):
@@ -62,6 +94,8 @@ async def active_snapshot_filter(
       Sources with no active snapshot yet contribute no job id; the final
       clause matches nothing for them, which is correct: a source that
       has never produced a snapshot has no active rows to read.
+    - All 'upsert': keeps the newest row per business key, independently
+      for each source and its configured key column.
     - Mixed: raises SnapshotScopeError.
 
     The helper is async because resolving the active pointer requires a
@@ -83,6 +117,7 @@ async def active_snapshot_filter(
             select(
                 DataSource.id,
                 DataSource.snapshot_mode,
+                DataSource.upsert_key_column,
                 BrowserExtractionProfile.active_ingestion_job_id,
             )
             .select_from(DataSource)
@@ -115,6 +150,16 @@ async def active_snapshot_filter(
     if mode == "append":
         return []
 
+    if mode == "upsert":
+        source_clauses = [
+            and_(
+                StagedRow.source_id == r.id,
+                *snapshot_key_filter(key_column=r.upsert_key_column),
+            )
+            for r in rows
+        ]
+        return [or_(*source_clauses)]
+
     # mode == 'replace_active'
     active_job_ids: list[uuid.UUID] = []
     for r in rows:
@@ -127,6 +172,67 @@ async def active_snapshot_filter(
         active_job_ids.append(r.active_ingestion_job_id)
 
     return [StagedRow.job_id.in_(active_job_ids)]
+
+
+def snapshot_key_filter(
+    *, key_column: str | None
+) -> list[ColumnElement[bool]]:
+    """
+    Rows for an upsert source, reduced to the newest row per business key.
+
+    Why this exists: a weekly full export in append mode double-counts.
+    Uploading sales totals 100k, 120k, 130k appends to 350k when the true
+    figure is 130k. 'replace_active' fixes it for whole-snapshot sources,
+    but an ERP sync sends changes, not snapshots. Upsert keeps the newest
+    row per key across every job, so an updated record replaces the old one
+    without discarding records the export did not mention.
+
+    `key_column` names the raw_data field that identifies a business
+    record (an order id, an invoice number). Without it an upsert source
+    cannot be summarised honestly, so the call raises rather than
+    returning every row and double-counting silently.
+
+    The filter is a correlated NOT EXISTS: keep a row only if no other row
+    for the same source and key was ingested later or, on a tie, has a
+    higher row_number. It reads every row's job timestamp, which is why
+    upsert sources are expected to be moderate in size.
+    """
+    if not key_column:
+        raise SnapshotScopeError(
+            "an 'upsert' source must declare a key column; otherwise the "
+            "newest record per business key cannot be determined"
+        )
+
+    newer = aliased(StagedRow)
+    newer_job = aliased(IngestionJob)
+    current_job = aliased(IngestionJob)
+    newer_is_later = or_(
+        newer_job.created_at > current_job.created_at,
+        and_(
+            newer_job.created_at == current_job.created_at,
+            or_(
+                newer.job_id > StagedRow.job_id,
+                and_(
+                    newer.job_id == StagedRow.job_id,
+                    newer.row_number > StagedRow.row_number,
+                ),
+            ),
+        ),
+    )
+    return [
+        ~(
+            select(newer.id)
+            .join(newer_job, newer_job.id == newer.job_id)
+            .join(current_job, current_job.id == StagedRow.job_id)
+            .where(
+                newer.source_id == StagedRow.source_id,
+                newer.raw_data[key_column].astext
+                == StagedRow.raw_data[key_column].astext,
+                newer_is_later,
+            )
+            .exists()
+        )
+    ]
 
 
 async def active_snapshot_filter_for_documents(

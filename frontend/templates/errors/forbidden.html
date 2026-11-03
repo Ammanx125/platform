@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Not permitted · {{ app_name }}{% endblock %}
+{% block main %}
+
+<header class="page-header">
+  <div class="eyebrow">403</div>
+  <h1 class="page-title">You do not have access to this</h1>
+  <p class="page-subtitle">
+    Your role does not include
+    <span class="mono">{{ permission }}</span>.
+    Ask a workspace administrator if you need it.
+  </p>
+</header>
+
+<section class="section panel">
+  <p class="muted">
+    This page was refused by the server, not hidden by the interface.
+    Nothing was run, saved, or sent.
+  </p>
+  <div class="btn-row mt-4">
+    <a class="btn" href="/">Back to overview</a>
+  </div>
+</section>
+
+{% endblock %}

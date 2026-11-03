@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.agent import Agent
 from app.db.models.dataset import DataSource
+from app.db.models.timestamps import FileObservation
 from app.services.audit import service as audit_service
 from app.services.timestamps.files import observe_file
 
@@ -270,8 +271,26 @@ async def process_sync_batch(
 
         status = spec.get("status", "new")
         if status == "deleted":
-            # Deletion handling is deferred. Record nothing for now; a
-            # future revision can mark the latest observation as deleted.
+            # A deleted file is a tombstone, not a no-op. The customer may
+            # have removed a spreadsheet precisely because it was wrong; if
+            # the platform keeps deriving KPIs from it, the dashboard keeps
+            # asserting something nobody can see or correct.
+            observations = (
+                await db.execute(
+                    select(FileObservation)
+                    .where(
+                        FileObservation.tenant_id == agent.tenant_id,
+                        FileObservation.source_id == agent.source_id,
+                        FileObservation.path == path,
+                    )
+                    .order_by(FileObservation.first_seen_at.desc())
+                )
+            ).scalars().all()
+            for observation in observations:
+                if observation.status == "deleted":
+                    continue
+                observation.status = "deleted"
+                observation.last_seen_at = datetime.now(UTC)
             counts["deleted"] += 1
             continue
 

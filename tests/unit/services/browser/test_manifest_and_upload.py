@@ -5,16 +5,12 @@ import hashlib
 
 import pytest
 
-from app.db.models.agent import Agent, AgentJob
-from app.db.models.browser import BrowserExtractionRun
-from app.db.models.dataset import DataSource, IngestionJob
+from app.db.models.agent import Agent
+from app.db.models.dataset import DataSource
 from app.db.session import SessionLocal
 from app.schemas.browser import (
-    BrowserExtractionJobParams,
     BrowserExtractionManifest,
-    BrowserExtractionPaginationSpec,
     BrowserExtractionProfileCreate,
-    BrowserExtractionReportSpec,
 )
 from app.services.browser import service as svc
 from app.services.browser.service import BrowserServiceError

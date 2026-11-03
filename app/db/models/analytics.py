@@ -8,6 +8,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -57,6 +58,25 @@ class KPIDefinition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     formula: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
     owner_pack: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+
+    # The reporting window this KPI is about. An all-time gross profit and a
+    # monthly gross profit are different numbers with the same name; a KPI
+    # without a period silently reports the former while reading like the
+    # latter.
+    #
+    #   'all_time'  — every row in scope (the historical default)
+    #   'day' | 'week' | 'month' | 'quarter' | 'year'
+    #                 — the N most recent complete-or-current periods ending
+    #                   at the tenant's latest data point; see
+    #                   app/services/analytics/periods.py
+    #
+    # 'all_time' is the default so existing definitions keep their meaning.
+    period: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="all_time", server_default="all_time"
+    )
+    period_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
 
 class AnomalyDetectorDefinition(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     """

@@ -132,6 +132,18 @@ class FileObservation(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     # sources where we never store a copy, or GC'd after processing).
     storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    # The ingestion job these bytes produced. Nullable: a metadata-only
+    # observation from the watcher (no upload requested yet) has no job.
+    # This is the link that lets a deletion tombstone hide the rows that
+    # file contributed; without it a deleted spreadsheet keeps powering
+    # every KPI.
+    ingestion_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("ingestion_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "tenant_id", "source_id", "path", "content_hash",

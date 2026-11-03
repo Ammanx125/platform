@@ -211,7 +211,14 @@ def report_from_stored(
             evidence=evidence,
             structured_report=structured_report,
         )
-        report.limitations.append("No evidence was recorded for this decision.")
+        if structured_report is None:
+            # Only a report built from evidence can honestly claim evidence
+            # was missing. A structured report carries its own content; a
+            # "no evidence" footer under it would contradict its own KPI
+            # section.
+            report.limitations.append("No evidence was recorded for this decision.")
+        else:
+            report.limitations.clear()
         return report
 
     for kind, attribute in (
@@ -236,8 +243,18 @@ def report_from_stored(
         if isinstance(raw, dict):
             evidence.capability_errors.append(raw)
 
-    return build_decision_report(
+    report = build_decision_report(
         query=query,
         evidence=evidence,
         structured_report=structured_report,
     )
+    if structured_report is not None and not (
+        evidence.kpis or evidence.forecasts or evidence.anomalies or evidence.chunks
+    ):
+        # Nothing was rehydrated to justify an evidence-derived limitation.
+        report.limitations = [
+            limitation
+            for limitation in report.limitations
+            if "No KPI or forecast evidence" not in limitation
+        ]
+    return report

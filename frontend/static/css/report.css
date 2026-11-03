@@ -1,0 +1,107 @@
+/* ==========================================================================
+   Printable structured report (/reports/{document_id})
+
+   Screen: a readable sheet inside the app shell.
+   Print:  the report only — no actions, no navigation, one section per page.
+   ========================================================================== */
+
+.report-page {
+  background: var(--surface-sunk);
+}
+
+.report-sheet {
+  max-width: 860px;
+  margin: var(--space-6) auto;
+  padding: var(--space-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.report-header {
+  margin-bottom: var(--space-8);
+}
+
+.report-header-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-bottom: var(--space-5);
+}
+
+.report-cover-title {
+  font-size: var(--fs-30);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+}
+
+.report-cover-meta {
+  margin-top: var(--space-3);
+  font-size: var(--fs-12);
+  color: var(--text-muted);
+}
+
+.report-footer {
+  margin-top: var(--space-8);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+  font-size: var(--fs-13);
+  color: var(--text-muted);
+}
+
+.report-footer-block+.report-footer-block {
+  margin-top: var(--space-4);
+}
+
+.report-footer ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+/* ---------- print ---------- */
+
+@media print {
+
+  /* Actions are screen-only. */
+  .no-print,
+  .topbar,
+  .sidebar {
+    display: none !important;
+  }
+
+  /* The sheet is the page: no app chrome, no shadows, real margins. */
+  .main,
+  .report-page {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .report-sheet {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  /* One section per page. */
+  .report-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .report-section+.report-section {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  .report-footer {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+}

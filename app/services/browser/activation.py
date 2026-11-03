@@ -81,6 +81,13 @@ async def maybe_activate_snapshot(
             f"run {run.id} reached activation with no verified sha256"
         )
 
+    # Re-check authorization immediately before the snapshot becomes the
+    # tenant's active data. A revocation that arrived during ingestion must
+    # not leave un-authorized rows powering the dashboard.
+    from app.services.browser.service import _assert_run_still_authorized
+
+    await _assert_run_still_authorized(db, run=run)
+
     profile = (
         await db.execute(
             select(BrowserExtractionProfile)

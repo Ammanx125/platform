@@ -41,6 +41,10 @@ from app.services.understanding import service as understanding_service
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
+# Uploads are read in 1 MiB slices so the memory ceiling is the limit plus
+# one chunk, not the size of whatever the client sends.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
 
 @router.get("", response_model=list[DataSourceRead])
 async def list_datasets(
@@ -168,16 +172,28 @@ async def upload_dataset(
     except IngestionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    content = await file.read()
     max_bytes = (
         settings.max_pdf_upload_bytes if ext == ".pdf"
         else settings.max_upload_bytes
     )
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"file too large (max {max_bytes} bytes)",
-        )
+    # Read in bounded chunks and abort the moment the limit is crossed.
+    # `await file.read()` buffered the entire upload before the size check,
+    # so the limit protected nothing: a 2 GB body was a 2 GB allocation.
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            chunks.clear()
+            raise HTTPException(
+                status_code=413,
+                detail=f"file too large (max {max_bytes} bytes)",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
     storage_key = ingestion_service.build_storage_key(
         tenant_id=tenant_id,

@@ -31,7 +31,6 @@ import uuid
 from datetime import datetime
 
 import sqlalchemy as sa
-
 from sqlalchemy import (
     DateTime,
     ForeignKey,

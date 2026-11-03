@@ -17,6 +17,7 @@ Every state transition emits an AuditEvent.
 from __future__ import annotations
 
 import time
+import uuid
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
@@ -29,6 +30,7 @@ from app.services.actions import policy as policy_service
 from app.services.actions.base import (
     ActionContext,
     ActionError,
+    ActionResult,
     VerificationOutcome,
 )
 from app.services.actions.registry import get as get_action
@@ -112,7 +114,12 @@ async def _handle_one(
         record.rejection_reason = "user not authorized for this tenant"
         record.validation_result = {
             "schema": {"passed": True},
-            "permission": {"passed": False, "error": "tenant mismatch or inactive"},
+            "permission": {
+                "passed": False,
+                "scope": "tenant_membership",
+                "rbac_checked": False,
+                "error": "tenant mismatch or inactive",
+            },
             "risk_level": action.risk_level,
         }
         await _audit_rejected(db, record=record, context=context)
@@ -127,7 +134,14 @@ async def _handle_one(
 
     validation_result: dict = {
         "schema": {"passed": True},
-        "permission": {"passed": True},
+        # Tenant membership and account status only. RBAC is NOT checked
+        # here, so this must not be called a permission pass — a caller
+        # reading the audit trail would conclude authorization happened.
+        "permission": {
+            "passed": True,
+            "scope": "tenant_membership",
+            "rbac_checked": False,
+        },
         "risk_level": action.risk_level,
         "validators": [
             {
@@ -202,7 +216,18 @@ async def execute_approved(
     The record is expected to already have status='approved'. This function
     re-loads the action, re-validates the arguments (defensive — someone
     could have edited the record), and runs the pipeline.
+
+    Refuses to run a record that has already been attempted. If an earlier
+    attempt left the record in 'executing' or 'verification_failed', the
+    side effect may have happened; running again could send a duplicate
+    email. Use reconcile_action() to resolve that state first.
     """
+    if int(getattr(record, "attempt_count", 0) or 0) > 0 and record.status != "approved":
+        raise ActionError(
+            f"action {record.id} already has {record.attempt_count} execution "
+            f"attempt(s) and is {record.status!r}; reconcile before retrying"
+        )
+
     action = get_action(record.tool_name)
     if action is None:
         record.status = "failed"
@@ -216,6 +241,37 @@ async def execute_approved(
             subject_type="action",
             subject_id=record.id,
             metadata={"reason": "tool no longer registered"},
+        )
+        return record
+
+    # Re-resolve policy immediately before execution. A tool queued for
+    # approval yesterday may have been disabled today; approving it must
+    # not run something the tenant has since switched off.
+    from app.services.actions import policy as policy_service
+
+    effective = await policy_service.resolve(
+        db,
+        tenant_id=record.tenant_id,
+        tool_name=record.tool_name,
+        tool_risk_level=action.risk_level,
+    )
+    if effective == policy_service.POLICY_DISABLED:
+        record.status = "failed"
+        record.error_message = (
+            f"tool {record.tool_name!r} is disabled by tenant policy"
+        )
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=record.tenant_id,
+            event_type="action.failed",
+            actor_user_id=actor_user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={
+                "reason": "policy disabled at execution time",
+                "tool_name": record.tool_name,
+            },
         )
         return record
 
@@ -261,6 +317,21 @@ async def _run_and_verify(
     record.started_at = datetime.now(UTC)
     t0 = time.perf_counter()
 
+    # Persist the intent BEFORE the external call.
+    #
+    # An email send and a database commit are independent transactions: the
+    # provider can succeed and the commit fail, leaving no record of a side
+    # effect that really happened. Writing the attempt first means a retry
+    # sees attempt_count > 0 on an "executing" record and can treat the
+    # outcome as uncertain rather than firing the side effect a second time.
+    # The key is stable, so a provider that supports idempotency can also
+    # deduplicate on it.
+    if not getattr(record, "idempotency_key", None):
+        record.idempotency_key = f"action:{record.id}"
+    record.attempt_count = int(getattr(record, "attempt_count", 0) or 0) + 1
+    context.idempotency_key = record.idempotency_key
+    await db.commit()
+
     try:
         result = await action.execute(db=db, payload=payload, context=context)
     except ActionError as exc:
@@ -300,13 +371,44 @@ async def _run_and_verify(
 
     record.execution_result = {"output": result.output}
 
-    # Verify.
-    verification: VerificationOutcome = await action.verify(
-        db=db,
-        payload=payload,
-        context=context,
-        result=result,
-    )
+    # Verify. An exception here means we cannot confirm the side effect —
+    # which is very different from it not happening. Leaving the record in
+    # "executing" (the old behaviour, since verify() was outside the
+    # try block) stranded it: nothing resolved the state and a retry could
+    # fire the side effect twice.
+    try:
+        verification: VerificationOutcome = await action.verify(
+            db=db,
+            payload=payload,
+            context=context,
+            result=result,
+        )
+    except Exception as exc:  # noqa: BLE001
+        record.verification_result = {
+            "verified": False,
+            "detail": None,
+            "error": f"verification raised: {exc}",
+        }
+        record.verification_error = f"verification raised: {exc}"
+        record.verified_at = datetime.now(UTC)
+        record.status = "verification_failed"
+        record.finished_at = datetime.now(UTC)
+        record.duration_ms = int((time.perf_counter() - t0) * 1000)
+        await db.flush()
+        await emit_event(
+            db,
+            tenant_id=context.tenant_id,
+            event_type="action.verification_failed",
+            actor_user_id=context.user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={
+                "tool_name": record.tool_name,
+                "error": str(exc),
+                "note": "executed but verification raised",
+            },
+        )
+        return
     record.verification_result = {
         "verified": verification.verified,
         "detail": verification.detail,
@@ -368,3 +470,92 @@ async def _audit_rejected(
         },
         message=record.rejection_reason,
     )
+
+async def reconcile_action(
+    db: AsyncSession,
+    *,
+    record: ActionRecord,
+    actor_user_id: uuid.UUID | None = None,
+) -> ActionRecord:
+    """
+    Resolve an action whose execution outcome is unknown.
+
+    Reachable states and why they are uncertain:
+      - 'executing' with attempt_count > 0: the process died mid-call. The
+        provider may or may not have acted.
+      - 'verification_failed': execution returned, but confirming the side
+        effect failed. It probably happened.
+
+    The tool's own verify() is the only authority on "did this happen". If it
+    confirms, the record becomes 'executed'. If it explicitly says no, the
+    record becomes 'failed' and is safe to retry. If verification itself
+    errors, the record stays 'verification_failed' and nothing is retried:
+    sending a second email is worse than an unresolved record.
+    """
+    action = get_action(record.tool_name)
+    if action is None:
+        record.status = "failed"
+        record.error_message = f"tool {record.tool_name!r} no longer registered"
+        await db.flush()
+        return record
+
+    try:
+        payload = action.parameters_model.model_validate(record.arguments)
+    except ValidationError:
+        # Arguments no longer validate, so verification cannot run. Leave the
+        # uncertain state intact rather than guessing.
+        await db.flush()
+        return record
+
+    context = ActionContext(
+        tenant_id=record.tenant_id,
+        user_id=record.user_id,
+        decision_run_id=record.decision_run_id,
+    )
+    stored_output = (record.execution_result or {}).get("output") or {}
+
+    try:
+        outcome = await action.verify(
+            db=db,
+            payload=payload,
+            context=context,
+            result=ActionResult(output=stored_output),
+        )
+    except Exception as exc:  # noqa: BLE001
+        record.verification_error = f"reconciliation raised: {exc}"
+        record.status = "verification_failed"
+        await db.flush()
+        return record
+
+    record.verification_result = {
+        "verified": outcome.verified,
+        "detail": outcome.detail,
+        "error": outcome.error,
+        "reconciled": True,
+    }
+    record.verification_error = outcome.error
+    record.verified_at = datetime.now(UTC)
+    record.status = "executed" if outcome.verified else "failed"
+    if not outcome.verified:
+        record.error_message = (
+            f"reconciliation could not confirm the side effect: {outcome.error}"
+        )
+    await db.flush()
+
+    await emit_event(
+        db,
+        tenant_id=record.tenant_id,
+        event_type=(
+            "action.executed" if outcome.verified else "action.reconcile_failed"
+        ),
+        actor_user_id=actor_user_id,
+        subject_type="action",
+        subject_id=record.id,
+        metadata={
+            "tool_name": record.tool_name,
+            "attempt_count": record.attempt_count,
+            "idempotency_key": record.idempotency_key,
+            "note": "reconciled after an uncertain execution",
+        },
+    )
+    return record

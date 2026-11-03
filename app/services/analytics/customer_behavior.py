@@ -338,6 +338,15 @@ async def analyze_tenant_customer_behavior(
         return None
 
     row_limit = limit or settings.customer_behavior_row_limit
+    from app.services.datasets.scope import (
+        active_snapshot_filter,
+        deleted_snapshot_filter,
+    )
+
+    scope_clauses = await active_snapshot_filter(
+        db, tenant_id=tenant_id, source_ids=eligible_source_ids
+    )
+    scope_clauses += await deleted_snapshot_filter(db, tenant_id=tenant_id)
     rows = list(
         (
             await db.execute(
@@ -345,6 +354,7 @@ async def analyze_tenant_customer_behavior(
                 .where(
                     StagedRow.tenant_id == tenant_id,
                     StagedRow.source_id.in_(eligible_source_ids),
+                    *scope_clauses,
                 )
                 .order_by(StagedRow.created_at, StagedRow.row_number)
                 .limit(row_limit + 1)

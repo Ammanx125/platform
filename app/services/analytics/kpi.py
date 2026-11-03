@@ -115,7 +115,11 @@ async def evaluate_kpi(
 
     try:
         ctx = await EvaluationContext.load(
-            db, tenant_id=tenant_id, source_ids=source_ids
+            db,
+            tenant_id=tenant_id,
+            source_ids=source_ids,
+            period=getattr(definition, "period", "all_time"),
+            period_count=getattr(definition, "period_count", 1),
         )
     except Exception as exc:  # noqa: BLE001
         return KPIResult(
@@ -158,6 +162,16 @@ async def evaluate_kpi(
                 "formula": definition.formula,
                 "rows_considered": len(ctx._rows),  # noqa: SLF001
                 "sources_used": [str(s) for s in ctx.source_ids],
+                # The window the number covers. A sum quoted without its
+                # period is not comparable to any other sum.
+                "period": getattr(ctx.period, "kind", "all_time"),
+                "period_label": getattr(ctx.period, "label", "all time"),
+                "period_start": (
+                    ctx.period.start.isoformat() if ctx.period and ctx.period.start else None
+                ),
+                "period_end": (
+                    ctx.period.end.isoformat() if ctx.period and ctx.period.end else None
+                ),
                 "concept_key": primary.key if primary else None,
                 "unit": primary.unit if primary else None,
                 "display_unit": result_unit,

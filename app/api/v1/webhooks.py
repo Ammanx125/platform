@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import crypto
+from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.services.ingestion import webhook as webhook_service
@@ -54,6 +55,15 @@ async def receive_webhook(
         ) from exc
 
     raw_body = await request.body()
+    max_bytes = settings.max_webhook_body_bytes
+    if len(raw_body) > max_bytes:
+        # `request.body()` has already buffered this, so the check cannot
+        # prevent the allocation — it can only refuse the payload. A real
+        # memory ceiling has to come from the ASGI layer / reverse proxy;
+        # this is the application-level backstop.
+        raise HTTPException(
+            status_code=413, detail=f"webhook body too large (max {max_bytes} bytes)"
+        )
     if not webhook_service.verify_signature(
         raw_body=raw_body,
         secret=secret,

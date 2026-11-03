@@ -12,6 +12,7 @@ from app.web.routes import (
     decisions,
     email,
     overview,
+    reports,
     scenarios,
     workflows,
 )
@@ -28,3 +29,4 @@ web_router.include_router(audit.router)
 web_router.include_router(workflows.router)
 web_router.include_router(email.router)
 web_router.include_router(scenarios.router)
+web_router.include_router(reports.router)

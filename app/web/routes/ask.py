@@ -13,13 +13,17 @@ from app.services.orchestration.context import OrchestratorRequest
 from app.services.orchestration.report_builder import report_from_stored
 from app.services.orchestration.report_store import load_structured_report
 from app.services.workflows.registry import get as get_workflow
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import templates
 
 router = APIRouter()
 
 
-@router.post("/ask", response_class=HTMLResponse)
+@router.post(
+    "/ask",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("decision:run"))],
+)
 async def ask(
     request: Request,
     user: HtmlUser,

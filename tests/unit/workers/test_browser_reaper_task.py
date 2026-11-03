@@ -6,8 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.core.config import settings
-from app.db.models.agent import Agent, AgentJob
-from app.db.models.browser import BrowserExtractionRun
+from app.db.models.agent import Agent
 from app.db.models.dataset import DataSource
 from app.db.session import SessionLocal
 from app.schemas.browser import BrowserExtractionProfileCreate
@@ -28,9 +27,11 @@ async def test_reaper_fails_expired_run(two_tenants):
     ta, ua = two_tenants["tenant_a"], two_tenants["user_a"]
     async with SessionLocal() as db:
         src = DataSource(tenant_id=ta, name="S", source_type="agent")
-        db.add(src); await db.flush()
+        db.add(src)
+        await db.flush()
         agent = Agent(tenant_id=ta, name="ag", source_id=src.id, status="active")
-        db.add(agent); await db.flush()
+        db.add(agent)
+        await db.flush()
         auth = await svc.create_authorization(
             db, tenant_id=ta, source_id=src.id, user_id=ua,
             origin="https://erp.example.com",

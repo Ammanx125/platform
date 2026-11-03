@@ -32,13 +32,16 @@ class ActionContext:
 
     Carries identity and origin, not business state. A validator that
     needs tenant data reads it from `db` (passed separately to execute,
-    not to validators, so validators stay pure).
+    not to validators, so validators stay pure). idempotency_key is set
+    immediately before execution so an adapter can forward it to a
+    provider that supports request deduplication.
     """
     tenant_id: uuid.UUID
     user_id: uuid.UUID
     decision_run_id: uuid.UUID | None
     source_ids: list[uuid.UUID] = field(default_factory=list)
     evidence_ids: list[str] = field(default_factory=list)
+    idempotency_key: str | None = None
 
 
 @dataclass

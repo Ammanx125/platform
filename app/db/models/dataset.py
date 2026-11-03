@@ -59,6 +59,15 @@ class DataSource(Base, UUIDPrimaryKeyMixin, TimestampMixin, TenantMixin):
     snapshot_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="append", server_default="append"
     )
+    # snapshot_mode:
+    #   'append'         — every ingested row is kept (transaction feeds)
+    #   'replace_active' — only the newest snapshot counts (full exports)
+    #   'upsert'         — the newest row per business key counts (ERP sync)
+    #
+    # upsert_key_column names the raw row field that identifies a business
+    # record. Required for 'upsert': without a key the platform cannot tell
+    # an update from a duplicate. Ignored for the other modes.
+    upsert_key_column: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "name", name="uq_data_sources_tenant_name"),

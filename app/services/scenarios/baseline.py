@@ -249,6 +249,11 @@ async def resolve_profit_baseline(
     )
     if active_job_id is not None:
         statement = statement.where(StagedRow.job_id == active_job_id)
+    from app.services.datasets.scope import deleted_snapshot_filter
+
+    statement = statement.where(
+        *await deleted_snapshot_filter(db, tenant_id=tenant_id)
+    )
     statement = statement.order_by(StagedRow.job_id, StagedRow.row_number).limit(_MAX_ROWS + 1)
     staged = (await db.execute(statement)).all()
     if len(staged) > _MAX_ROWS:

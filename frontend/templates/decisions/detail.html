@@ -42,9 +42,14 @@
      used to add. #}
   {# Limitations render even with no cards/chart/table: "we found nothing"
      is information a manager needs, not an empty section. #}
-  {% if report and (report.kpi_cards or report.chart or report.table or report.limitations) %}
+  {% if report and (report.structured or report.kpi_cards or report.chart or report.table or report.limitations) %}
     <section class="brief-section">
-      <div class="brief-section-label">Report</div>
+      <div class="brief-section-label">
+        Report
+        {% if report_document_id %}
+          <a class="section-action" href="/reports/{{ report_document_id }}">View full report →</a>
+        {% endif %}
+      </div>
       {% include "components/decision_report.html" %}
     </section>
   {% endif %}

@@ -17,11 +17,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
 from app.api.v1 import api_router
+from app.core.body_limit import BodyLimitMiddleware
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.db.session import get_db
-from app.web.deps import _RedirectToLogin, make_redirect_to_login
+from app.web.deps import (
+    _PermissionDenied,
+    _RedirectToLogin,
+    make_redirect_to_login,
+)
 from app.web.router import web_router
+from app.web.templating import templates
 
 _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
 
@@ -51,10 +57,44 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exception_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+# Body limits. Registered last so it wraps everything above it and sees a
+# request before any handler (or rate-limiter storage) has buffered a body.
+#
+#   uploads    — one file per request, the largest legitimate payload
+#   webhooks   — third-party callers, much smaller than an upload
+#   default    — everything else
+app.add_middleware(
+    BodyLimitMiddleware,
+    default_limit=settings.max_pdf_upload_bytes,
+    path_limits=[
+        ("/api/v1/webhooks/", settings.max_webhook_body_bytes),
+        ("/api/v1/agents/", settings.agent_max_upload_bytes),
+        ("/api/v1/datasets/", settings.max_pdf_upload_bytes),
+        ("/ask", settings.max_form_body_bytes),
+    ],
+)
+
 
 @app.exception_handler(_RedirectToLogin)
 async def _redirect_handler(request: Request, exc: _RedirectToLogin):
     return make_redirect_to_login()
+
+
+@app.exception_handler(_PermissionDenied)
+async def _permission_denied_handler(request: Request, exc: _PermissionDenied):
+    """A signed-in user without the required permission gets a page, not JSON."""
+    return templates.TemplateResponse(
+        request,
+        "errors/forbidden.html",
+        {
+            "request": request,
+            "permission": exc.permission,
+            "app_name": settings.app_name,
+            "csrf_cookie_name": settings.csrf_cookie_name,
+            "csrf_header_name": settings.csrf_header_name,
+        },
+        status_code=403,
+    )
 
 
 app.mount(

@@ -76,7 +76,10 @@ class SQLRetriever:
         # sources. Resolve the effective source list (either the explicit
         # filters or every active source for the tenant) before calling
         # the helper, because it needs a concrete list to check modes.
-        from app.services.datasets.scope import active_snapshot_filter
+        from app.services.datasets.scope import (
+            active_snapshot_filter,
+            deleted_snapshot_filter,
+        )
         if f.source_ids:
             scope_source_ids = list(f.source_ids)
         else:
@@ -93,6 +96,9 @@ class SQLRetriever:
         if scope_source_ids:
             scope_clauses = await active_snapshot_filter(
                 db, tenant_id=tenant_id, source_ids=scope_source_ids,
+            )
+            scope_clauses += await deleted_snapshot_filter(
+                db, tenant_id=tenant_id
             )
             stmt = stmt.where(*scope_clauses)
 

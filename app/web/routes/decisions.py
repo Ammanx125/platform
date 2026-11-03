@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.decision import DecisionRun
 from app.db.session import get_db
 from app.services.orchestration.report_builder import report_from_stored
-from app.services.orchestration.report_store import load_structured_report
+from app.services.orchestration.report_store import (
+    find_structured_report_document_id,
+    load_structured_report,
+)
 from app.web.deps import HtmlUser
 from app.web.templating import base_context, templates
 
@@ -76,6 +79,14 @@ async def decision_detail(
         structured_report=structured_report,
     )
 
+    report_document_id = (
+        await find_structured_report_document_id(
+            db, tenant_id=user.tenant_id, decision_run_id=row.id
+        )
+        if structured_report is not None
+        else None
+    )
+
     return templates.TemplateResponse(
         request,
         "decisions/detail.html",
@@ -87,5 +98,6 @@ async def decision_detail(
             "user_email": user.email,
             "decision": row,
             "report": report,
+            "report_document_id": report_document_id,
         },
     )

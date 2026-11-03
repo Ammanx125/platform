@@ -331,12 +331,17 @@ async def agent_upload_content(
     browser_run = (
         await db.execute(
             select(BrowserExtractionRun)
+            .join(AgentJob, AgentJob.id == BrowserExtractionRun.agent_job_id)
             .where(
                 BrowserExtractionRun.tenant_id == agent.tenant_id,
                 BrowserExtractionRun.status.in_(
                     ("manifest_received", "awaiting_upload")
                 ),
                 BrowserExtractionRun.expected_sha256 == content_hash,
+                # Bind the run to the authenticated agent. Tenant scope alone
+                # let any agent in the workspace upload bytes for another
+                # agent's extraction, if it knew the expected hash.
+                AgentJob.agent_id == agent.id,
             )
             .order_by(BrowserExtractionRun.created_at.asc())
             .limit(1)
@@ -348,7 +353,7 @@ async def agent_upload_content(
         if len(content) > settings.browser_upload_max_bytes:
             raise HTTPException(status_code=413, detail="snapshot too large")
         try:
-            ingestion_job = await browser_service.accept_upload(
+            browser_ingestion_job = await browser_service.accept_upload(
                 db,
                 run=browser_run,
                 agent_tenant_id=agent.tenant_id,
@@ -360,7 +365,7 @@ async def agent_upload_content(
         await db.commit()
         return {
             "status": "accepted",
-            "ingestion_job_id": str(ingestion_job.id),
+            "ingestion_job_id": str(browser_ingestion_job.id),
         }
 
     # Find the pending upload row for this hash.

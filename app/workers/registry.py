@@ -27,14 +27,5 @@ TASKS: list[Task] = [
 ]
 
 
-TASKS: list[Task] = [
-    Task("ingestion", 2.0, run_ingestion_once),
-    Task("webhooks", 2.0, run_webhooks_once),
-    Task("workflows_pending", 2.0, run_pending_workflows_once),
-    Task("workflows_resume", 2.0, run_waiting_workflows_once),
-    Task("triggers", 3.0, run_triggers_once),
-]
-
-
 def get_tasks() -> list[Task]:
     return TASKS

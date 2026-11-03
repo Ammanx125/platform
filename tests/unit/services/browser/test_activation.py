@@ -6,7 +6,6 @@ import hashlib
 import pytest
 
 from app.db.models.agent import Agent
-from app.db.models.browser import BrowserExtractionRun
 from app.db.models.dataset import DataSource, IngestionJob
 from app.db.session import SessionLocal
 from app.services.browser import service as svc
@@ -121,6 +120,7 @@ async def test_activation_supersedes_previous(two_tenants):
         await db.commit()
 
         import hashlib
+
         from app.schemas.browser import BrowserExtractionManifest
 
         content = b"date,amount\n2026-02-01,99\n"

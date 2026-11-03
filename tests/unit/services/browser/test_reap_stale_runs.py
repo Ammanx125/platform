@@ -31,7 +31,8 @@ async def test_reap_marks_old_in_flight_runs_failed(two_tenants):
     ta, ua = two_tenants["tenant_a"], two_tenants["user_a"]
     async with SessionLocal() as db:
         src = DataSource(tenant_id=ta, name="S", source_type="agent")
-        db.add(src); await db.flush()
+        db.add(src)
+        await db.flush()
         db.add(Agent(tenant_id=ta, name="ag", source_id=src.id, status="active"))
         await db.flush()
         auth = await svc.create_authorization(
@@ -54,7 +55,8 @@ async def test_reap_marks_old_in_flight_runs_failed(two_tenants):
             )).scalar_one().id,
             job_type="browser_extract", params={}, status="in_progress",
         )
-        db.add(job1); await db.flush()
+        db.add(job1)
+        await db.flush()
 
         old_run = await _make_in_flight_run(
             db, tenant_id=ta, profile_id=prof.id, agent_job_id=job1.id,
@@ -83,9 +85,11 @@ async def test_reap_leaves_fresh_runs_and_terminal_states_alone(two_tenants):
     ta, ua = two_tenants["tenant_a"], two_tenants["user_a"]
     async with SessionLocal() as db:
         src = DataSource(tenant_id=ta, name="S2", source_type="agent")
-        db.add(src); await db.flush()
+        db.add(src)
+        await db.flush()
         agent = Agent(tenant_id=ta, name="ag2", source_id=src.id, status="active")
-        db.add(agent); await db.flush()
+        db.add(agent)
+        await db.flush()
         auth = await svc.create_authorization(
             db, tenant_id=ta, source_id=src.id, user_id=ua,
             origin="https://erp.example.com",
@@ -104,7 +108,8 @@ async def test_reap_leaves_fresh_runs_and_terminal_states_alone(two_tenants):
             tenant_id=ta, agent_id=agent.id, job_type="browser_extract",
             params={}, status="in_progress",
         )
-        db.add(job); await db.flush()
+        db.add(job)
+        await db.flush()
 
         fresh = await _make_in_flight_run(
             db, tenant_id=ta, profile_id=prof.id, agent_job_id=job.id,

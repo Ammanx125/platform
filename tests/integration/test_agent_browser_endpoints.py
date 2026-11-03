@@ -11,9 +11,8 @@ import hashlib
 import pytest
 from httpx import AsyncClient
 
-from app.db.models.agent import Agent
 from app.db.models.browser import BrowserExtractionRun
-from app.db.models.dataset import DataSource, IngestionJob
+from app.db.models.dataset import DataSource
 from app.db.session import SessionLocal
 from app.schemas.browser import BrowserExtractionProfileCreate
 from app.services.browser import service as svc

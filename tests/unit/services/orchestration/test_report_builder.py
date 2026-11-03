@@ -312,3 +312,45 @@ def test_report_from_stored_marks_an_empty_evidence_record():
 
     assert report.kpi_cards == []
     assert "No evidence was recorded for this decision." in report.limitations
+
+
+# ---------- structured reports do not inherit evidence limitations ----------
+
+
+def _structured_report():
+    from app.schemas.report_structured import ReportSection, StructuredReport
+
+    return StructuredReport(
+        title="Weekly Revenue Review",
+        sections=[
+            ReportSection(section_type="summary", title="Summary", body="Revenue grew."),
+            ReportSection(section_type="kpis", title="Headline figures"),
+        ],
+    )
+
+
+def test_structured_report_does_not_claim_evidence_is_missing():
+    """
+    A standalone structured report has no evidence payload by design. Its
+    own KPI section must not sit above a footer saying no KPIs were found.
+    """
+    report = report_from_stored("Weekly Revenue Review", {}, structured_report=_structured_report())
+
+    assert report.limitations == []
+
+
+def test_structured_report_keeps_real_capability_limitations():
+    stored = {
+        "capability_errors": [{"capability": "forecast", "error": "no series"}],
+    }
+    report = report_from_stored("q", stored, structured_report=_structured_report())
+
+    assert any("forecast did not run" in line for line in report.limitations)
+    # ...but still no false "no evidence" line.
+    assert not any("No KPI or forecast evidence" in line for line in report.limitations)
+
+
+def test_decision_report_without_structure_still_reports_missing_evidence():
+    """The fallback path is unchanged: nothing recorded is worth saying."""
+    report = report_from_stored("q", {})
+    assert "No evidence was recorded for this decision." in report.limitations

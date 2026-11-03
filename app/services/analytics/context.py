@@ -129,6 +129,9 @@ class EvaluationContext:
         self._source_ids = source_ids
         self._concepts = concepts or {}
 
+    # The resolved window, attached by load() so callers can report it.
+    period = None
+
     @classmethod
     async def load(
         cls,
@@ -137,6 +140,8 @@ class EvaluationContext:
         tenant_id: uuid.UUID,
         source_ids: list[uuid.UUID] | None,
         row_limit: int = 100_000,
+        period: str | None = None,
+        period_count: int = 1,
     ) -> EvaluationContext:
         """
         Load rows + mappings for the given tenant and sources.
@@ -145,6 +150,12 @@ class EvaluationContext:
         is capped at `row_limit` to prevent unbounded memory; callers that
         need more should implement aggregation-in-SQL (a future Step 8x
         concern, not 8a).
+
+        `period` restricts the rows to a reporting window anchored on the
+        tenant's newest data point (see app/services/analytics/periods.py).
+        Rows without a row timestamp are excluded from a bounded window:
+        their date is unknown, so claiming they fall inside the period
+        would be a guess.
         """
         from app.db.models.dataset import DataSource
 
@@ -198,19 +209,66 @@ class EvaluationContext:
 
         # Load staged rows. `__source_id` is injected so operations can
         # attribute values back to a source when needed.
-                # Load staged rows. `__source_id` is injected so operations can
-        # attribute values back to a source when needed.
-        from app.services.datasets.scope import active_snapshot_filter
+        from app.services.datasets.scope import (
+            active_snapshot_filter,
+            deleted_snapshot_filter,
+        )
 
         scope_clauses = await active_snapshot_filter(
             db, tenant_id=tenant_id, source_ids=resolved_sources,
         )
+        # Deleted source files contribute nothing, whatever the mode.
+        scope_clauses = scope_clauses + await deleted_snapshot_filter(
+            db, tenant_id=tenant_id
+        )
+
         rows_stmt = (
             select(StagedRow)
             .where(StagedRow.source_id.in_(resolved_sources))
             .where(*scope_clauses)
             .limit(row_limit)
         )
+
+        # Reporting window. Resolved against the newest timestamp in scope,
+        # not against now(), so a dataset covering last quarter is evaluated
+        # as "last month of that data" rather than as an empty month.
+        resolved_period = None
+        if period and period != "all_time":
+            from app.db.models.timestamps import RowTimestamp
+            from app.services.analytics.periods import (
+                period_bounds_utc,
+                resolve_period,
+            )
+
+            anchor_row = (
+                await db.execute(
+                    select(RowTimestamp.timestamp)
+                    .join(StagedRow, StagedRow.id == RowTimestamp.staged_row_id)
+                    .where(StagedRow.source_id.in_(resolved_sources))
+                    .where(*scope_clauses)
+                    .order_by(RowTimestamp.timestamp.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            anchor = anchor_row.date() if anchor_row is not None else None
+            resolved_period = resolve_period(
+                period, anchor=anchor, count=period_count
+            )
+            start, end = period_bounds_utc(resolved_period)
+            if start is not None and end is not None:
+                in_window = (
+                    select(RowTimestamp.staged_row_id)
+                    .where(
+                        RowTimestamp.staged_row_id == StagedRow.id,
+                        RowTimestamp.timestamp >= start,
+                        RowTimestamp.timestamp < end,
+                    )
+                    .exists()
+                )
+                rows_stmt = select(StagedRow).where(
+                    StagedRow.source_id.in_(resolved_sources)
+                ).where(*scope_clauses).where(in_window).limit(row_limit)
+
         staged = (await db.execute(rows_stmt)).scalars().all()
 
         rows: list[dict[str, Any]] = []
@@ -219,12 +277,14 @@ class EvaluationContext:
             row["__source_id"] = str(s.source_id)
             rows.append(row)
 
-        return cls(
+        instance = cls(
             rows=rows,
             column_map=column_map,
             source_ids=resolved_sources,
             concepts=concepts,
         )
+        instance.period = resolved_period
+        return instance
 
     @property
     def source_ids(self) -> list[uuid.UUID]:

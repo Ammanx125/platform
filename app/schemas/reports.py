@@ -55,3 +55,7 @@ class DecisionReport(BaseModel):
     table: TableBlock | None = None
     structured: StructuredReport | None = None
     limitations: list[str] = Field(default_factory=list)
+    # Provenance for the printable view. Both default to empty so callers
+    # that do not track them (the decision page) are unaffected.
+    formula_versions: dict[str, int] = Field(default_factory=dict)
+    sources: list[str] = Field(default_factory=list)

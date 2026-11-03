@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,57 +69,90 @@ def _render_prompt(request: OrchestratorRequest, evidence: Evidence) -> str:
     """
     Build the user-message content.
 
-    Two-part format per the design decision: JSON for machine-verifiable
-    fields (evidence_ids), prose for readability.
+    Two parts: a bounded machine-readable index (so the model can cite
+    evidence_ids) and readable prose.
+
+    Every string that came from a source is untrusted, whichever capability
+    produced it — an email body, a supplier name, a spreadsheet cell, a
+    document excerpt. Earlier versions serialised `evidence.to_dict()`
+    straight into the prompt, which let a cell containing "ignore previous
+    instructions" reach the model unwrapped. This renders an explicit, typed
+    projection instead and wraps every free-text value.
+
+    Delimiters are a mitigation, not a security boundary. Authorization and
+    tool policy are enforced in code, never inferred from prompt content.
     """
     lines: list[str] = []
-    lines.append("## Evidence (JSON)")
-    import json
-    lines.append(json.dumps(evidence.to_dict(), indent=2, default=str))
+    lines.append("## Evidence index")
+    lines.append(
+        "One entry per item: id, kind, numeric fields only. Text is in the "
+        "prose section below."
+    )
+    for item in evidence.all_items():
+        lines.append("- " + _render_index_entry(item))
     lines.append("")
 
     lines.append("## Evidence (prose)")
-    if evidence.chunks:
-        lines.append("Document / row excerpts:")
-        for item in evidence.chunks[:10]:
+
+    def _section(title: str, items: list, limit: int = 10, width: int = 300) -> None:
+        if not items:
+            return
+        lines.append(f"{title}:")
+        for item in items[:limit]:
             wrapped = wrap_untrusted(
-                item.text[:300],
+                str(item.text)[:width],
                 flagged=bool(item.injection_flags),
             )
             lines.append(f"- [{item.id}] {wrapped}")
-    if evidence.kpis:
-        lines.append("KPIs:")
-        for item in evidence.kpis:
-            lines.append(f"- [{item.id}] {item.text}")
-    if evidence.anomalies:
-        lines.append("Anomalies:")
-        for item in evidence.anomalies[:10]:
-            lines.append(f"- [{item.id}] {item.text}")
-    if evidence.forecasts:
-        lines.append("Forecasts:")
-        for item in evidence.forecasts:
-            lines.append(f"- [{item.id}] {item.text}")
-    if evidence.customer_behaviors:
-        lines.append("Customer behavior:")
-        for item in evidence.customer_behaviors:
-            lines.append(f"- [{item.id}] {item.text}")
-    if evidence.workflows:
-        lines.append("Workflows:")
-        for item in evidence.workflows:
-            lines.append(f"- [{item.id}] {item.text}")
-    if evidence.email_summaries:
-        lines.append("Email inbox summary:")
-        for item in evidence.email_summaries:
-            lines.append(f"- [{item.id}] {item.text}")
+
+    _section("Document / row excerpts", evidence.chunks)
+    _section("KPIs", evidence.kpis, limit=100, width=200)
+    _section("Anomalies", evidence.anomalies)
+    _section("Forecasts", evidence.forecasts, limit=100, width=200)
+    _section("Customer behavior", evidence.customer_behaviors)
+    _section("Workflows", evidence.workflows)
+    _section("Email inbox summary", evidence.email_summaries)
+
     if evidence.capability_errors:
         lines.append("Capability errors:")
         for err in evidence.capability_errors:
-            lines.append(f"- {err.get('capability')}: {err.get('error')}")
+            capability = str(err.get("capability", ""))
+            message = str(err.get("error", ""))
+            lines.append(f"- {capability}: {wrap_untrusted(message[:300])}")
 
     lines.append("")
     lines.append("## Question")
+    # The question is user input, not source data: it states intent and is
+    # deliberately not wrapped, so the model treats it as the task.
     lines.append(request.query)
     return "\n".join(lines)
+
+
+# Identity fields are produced by the platform (capability code), not by
+# source data. Everything else is treated as untrusted text.
+_INDEX_SAFE_KEYS = frozenset(
+    {"id", "kind", "key", "detector_key", "value_concept", "horizon", "status"}
+)
+_INDEX_MAX_VALUE = 80
+
+
+def _render_index_entry(item: Any) -> str:
+    """One compact, bounded index line for an evidence item."""
+    parts = [f"id={item.id}", f"kind={item.kind}"]
+    data = item.data or {}
+    for key in sorted(data):
+        if key.startswith("_") or key in ("content", "text"):
+            continue
+        value = data[key]
+        if isinstance(value, (bool, int, float)) and not isinstance(value, bool):
+            parts.append(f"{key}={value}")
+            continue
+        if key in _INDEX_SAFE_KEYS and isinstance(value, str):
+            parts.append(f"{key}={value[:_INDEX_MAX_VALUE]}")
+            continue
+        # Anything else is source-derived and may be long or hostile: do
+        # not echo it into the machine-readable section at all.
+    return " | ".join(parts)
 
 
 _SYSTEM_PROMPT = (

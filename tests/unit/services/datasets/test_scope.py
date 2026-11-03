@@ -108,6 +108,39 @@ async def test_mixed_modes_raise(two_tenants):
 
 
 @pytest.mark.asyncio
+async def test_upsert_sources_use_their_own_key_columns(two_tenants):
+    ta = two_tenants["tenant_a"]
+    async with SessionLocal() as db:
+        first = DataSource(
+            tenant_id=ta,
+            name="upsert-order",
+            source_type="agent",
+            snapshot_mode="upsert",
+            upsert_key_column="order_id",
+        )
+        second = DataSource(
+            tenant_id=ta,
+            name="upsert-invoice",
+            source_type="agent",
+            snapshot_mode="upsert",
+            upsert_key_column="invoice_id",
+        )
+        db.add_all([first, second])
+        await db.commit()
+
+        clauses = await active_snapshot_filter(
+            db, tenant_id=ta, source_ids=[first.id, second.id],
+        )
+
+        assert len(clauses) == 1
+        compiled = str(clauses[0].compile(compile_kwargs={"literal_binds": True}))
+        assert "order_id" in compiled
+        assert "invoice_id" in compiled
+        assert str(first.id).replace("-", "") in compiled
+        assert str(second.id).replace("-", "") in compiled
+
+
+@pytest.mark.asyncio
 async def test_foreign_source_rejected(two_tenants):
     ta, tb = two_tenants["tenant_a"], two_tenants["tenant_b"]
     async with SessionLocal() as db:

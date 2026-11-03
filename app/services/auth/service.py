@@ -128,6 +128,15 @@ async def refresh(db: AsyncSession, *, raw_refresh_token: str) -> tuple[User, st
     if row.tenant_id != user.tenant_id:
         raise TenantIsolationError("refresh token tenant mismatch")
 
+    # A suspended tenant must not be able to rotate a refresh token into a
+    # fresh access token. Checked before the rotation so no new token is
+    # issued and the current one is not needlessly revoked.
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if tenant is None or not tenant.is_active:
+        raise AuthError("tenant is disabled")
+
     # Revoke current, issue new in same family.
     new_raw, new_row = await _issue_refresh_token(db, user=user, family_id=row.family_id)
     row.revoked_at = now

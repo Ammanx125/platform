@@ -46,3 +46,34 @@ def make_redirect_to_login() -> RedirectResponse:
 
 
 HtmlUser = Annotated[User, Depends(require_html_user)]
+
+
+class _PermissionDenied(Exception):
+    """Carries the permission name to the handler in app/main.py."""
+
+    def __init__(self, permission: str) -> None:
+        self.permission = permission
+        super().__init__(permission)
+
+
+def require_html_permission(required: str):
+    """
+    HTML counterpart of app.api.deps.require_permission.
+
+    Authentication on HTML routes is a cookie + redirect flow, so the API's
+    JSON 403 is wrong here: it would leave a signed-in user staring at a
+    JSON body. This raises a sentinel that main.py turns into a rendered
+    page. The permission check itself is identical — any of the user's
+    roles granting `required` is enough.
+
+    Never rely on the template hiding a button. Hiding is presentation; this
+    is the enforcement point.
+    """
+
+    async def _checker(user: HtmlUser) -> User:
+        granted = {p.key for role in user.roles for p in role.permissions}
+        if required not in granted:
+            raise _PermissionDenied(required)
+        return user
+
+    return _checker

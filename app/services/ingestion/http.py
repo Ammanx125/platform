@@ -53,6 +53,11 @@ if TYPE_CHECKING:
     from app.db.models.dataset import DataSource
 
 
+# Responses are streamed in 64 KiB slices so the memory ceiling is the
+# configured limit plus one chunk.
+_HTTP_CHUNK_BYTES = 64 * 1024
+
+
 # ---------- SSRF defense ----------
 
 def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -221,25 +226,42 @@ class HTTPConnector:
             body = cfg.get("body")
 
         try:
+            # Stream the response so an oversized body is abandoned part-way
+            # instead of being buffered first. `resp.content` read the whole
+            # thing into memory before the size check ran.
             async with _make_client(timeout=timeout) as client:
-                resp = await client.request(
+                async with client.stream(
                     method, url, headers=headers, json=body
-                )
+                ) as resp:
+                    if resp.status_code >= 400:
+                        raise IngestionError(
+                            f"HTTP {resp.status_code} from {parsed.hostname}"
+                        )
+
+                    declared = resp.headers.get("content-length")
+                    if declared is not None:
+                        try:
+                            if int(declared) > max_bytes:
+                                raise IngestionError(
+                                    f"response too large: {declared} > {max_bytes}"
+                                )
+                        except ValueError:
+                            pass  # unparseable header: rely on the read below
+
+                    collected: list[bytes] = []
+                    total = 0
+                    async for chunk in resp.aiter_bytes(_HTTP_CHUNK_BYTES):
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise IngestionError(
+                                f"response too large: exceeds {max_bytes} bytes"
+                            )
+                        collected.append(chunk)
+                    content = b"".join(collected)
         except IngestionError:
             raise
         except httpx.HTTPError as exc:
             raise IngestionError(f"HTTP request failed: {exc}") from exc
-
-        if resp.status_code >= 400:
-            raise IngestionError(
-                f"HTTP {resp.status_code} from {parsed.hostname}"
-            )
-
-        content = resp.content
-        if len(content) > max_bytes:
-            raise IngestionError(
-                f"response too large: {len(content)} > {max_bytes}"
-            )
 
         fmt = (cfg.get("format") or "json").lower()
         return content, fmt

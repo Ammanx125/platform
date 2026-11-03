@@ -118,6 +118,13 @@ class Settings(BaseSettings):
     # HTTP connector
     http_timeout_seconds: int = 30
     http_max_response_bytes: int = 10 * 1024 * 1024  # 10 MB
+    # Application-level cap on a webhook payload. Enforced after the ASGI
+    # layer has buffered the body, so it is a refusal limit, not a memory
+    # guard; set the proxy's body limit for the real ceiling.
+    max_webhook_body_bytes: int = 2 * 1024 * 1024  # 2 MB
+    # Cap on a plain form POST (the Ask page). Small queries; a large body
+    # here is never legitimate.
+    max_form_body_bytes: int = 1024 * 1024  # 1 MB
 
     # Webhook encryption (see crypto decision)
     webhook_enc_key: str | None = None

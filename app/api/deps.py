@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.exceptions import AuthError
 from app.core.security import decode_access_token
 from app.db.models.agent import Agent as DBAgent
+from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.session import get_db
 from app.services.agents import service as agents_service
@@ -45,6 +46,15 @@ async def get_current_user(
     # tampered with a signed token or the user was moved — either way, refuse.
     if user.tenant_id != token_tenant_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid tenant")
+
+    # Tenant suspension must invalidate the whole session, not just new
+    # logins. Without this, an access token minted before suspension keeps
+    # working until it expires.
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+    if tenant is None or not tenant.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="tenant is disabled")
 
     return user
 

@@ -13,19 +13,7 @@ only manages the records.
 """
 from __future__ import annotations
 
-import uuid
-from datetime import UTC, datetime
-
 import csv
-
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.models.browser import BrowserAuthorization, BrowserExtractionRun
-from app.db.models.dataset import DataSource, IngestionJob
-from app.services.audit import service as audit_service
-from app.services.audit import types as audit_types
-
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -42,13 +30,16 @@ from app.db.models.browser import (
     BrowserExtractionProfile,
     BrowserExtractionRun,
 )
-from app.db.models.dataset import DataSource
+from app.db.models.dataset import DataSource, IngestionJob
 from app.schemas.browser import (
     BrowserExtractionJobParams,
+    BrowserExtractionManifest,
     BrowserExtractionPaginationSpec,
     BrowserExtractionProfileCreate,
     BrowserExtractionReportSpec,
 )
+from app.services.audit import service as audit_service
+from app.services.audit import types as audit_types
 
 
 class BrowserServiceError(Exception):
@@ -239,6 +230,42 @@ async def get_active_authorization(
             )
         )
     ).scalar_one_or_none()
+
+
+async def _assert_run_still_authorized(
+    db: AsyncSession, *, run: BrowserExtractionRun
+) -> None:
+    """
+    Raise if the run's source/origin authorization is no longer active.
+
+    Called at upload acceptance and again before activation so a revocation
+    cannot be outrun by an extraction already in flight.
+    """
+    profile = (
+        await db.execute(
+            select(BrowserExtractionProfile).where(
+                BrowserExtractionProfile.id == run.profile_id,
+                BrowserExtractionProfile.tenant_id == run.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if profile is None:
+        raise BrowserServiceError(
+            "the extraction profile for this run no longer exists"
+        )
+
+    authorization = (
+        await db.execute(
+            select(BrowserAuthorization).where(
+                BrowserAuthorization.id == profile.authorization_id,
+                BrowserAuthorization.tenant_id == run.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if authorization is None or authorization.status != "active":
+        raise BrowserServiceError(
+            "browser extraction authorization for this run is no longer active"
+        )
 
 # ---------- profiles ----------
 
@@ -708,18 +735,6 @@ async def get_run(
     ).scalar_one_or_none()
 
 # ---------- manifest + upload (stage 5) ----------
-
-from app.schemas.browser import (
-    BrowserActivationResult,
-    BrowserExtractionManifest,
-    BrowserExtractionJobParams,
-)
-from app.services.browser.activation import (
-    ActivationError,
-    maybe_activate_snapshot,
-)
-
-
 async def handle_manifest(
     db: AsyncSession,
     *,
@@ -878,13 +893,11 @@ async def accept_upload(
     or let the reaper time it out.
     """
     import hashlib
-    import json as _json
     from io import StringIO
 
-    from app.core.config import settings
     from app.services.ingestion import service as ingestion_service
-    from app.services.timestamps.files import observe_file
     from app.services.storage.local import storage
+    from app.services.timestamps.files import observe_file
 
     if run.tenant_id != agent_tenant_id:
         raise BrowserServiceError("run does not belong to this tenant")
@@ -892,6 +905,12 @@ async def accept_upload(
         raise BrowserServiceError(
             f"run is {run.status!r}; cannot accept an upload"
         )
+
+    # Authorization is rechecked here, not only when the manifest arrived.
+    # Revocation between the manifest and the upload must stop the data
+    # landing, otherwise "revoke" only takes effect for extractions that
+    # have not started yet.
+    await _assert_run_still_authorized(db, run=run)
 
     actual_hash = hashlib.sha256(content).hexdigest()
     if actual_hash != content_hash:

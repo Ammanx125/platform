@@ -47,7 +47,7 @@ class ProfitAssumptions(ProfitAssumptionsRead):
 
 
 class ScenarioCalculateRequest(BaseModel):
-    scenario_type: ScenarioType = engine.SCENARIO_TYPE
+    scenario_type: ScenarioType = "profit_sensitivity_v1"
     source_id: uuid.UUID
     assumptions: ProfitAssumptions
 
