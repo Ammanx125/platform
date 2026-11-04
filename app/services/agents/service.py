@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.agent import Agent
 from app.db.models.dataset import DataSource
+from app.db.models.tenant import Tenant
 from app.db.models.timestamps import FileObservation
 from app.services.audit import service as audit_service
 from app.services.timestamps.files import observe_file
@@ -221,6 +222,13 @@ async def authenticate_agent(
         raise AgentError("invalid credential")
     if agent.status != "active":
         raise AgentError(f"agent is {agent.status!r}")
+
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == agent.tenant_id))
+    ).scalar_one_or_none()
+    if tenant is None or not tenant.is_active:
+        raise AgentError("tenant is disabled")
+
     return agent
 
 

@@ -33,7 +33,7 @@ from app.db.models.knowledge import Document
 from app.db.session import get_db
 from app.schemas.report_structured import StructuredReport
 from app.services.orchestration.report_builder import report_from_stored
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import base_context, templates
 
 router = APIRouter()
@@ -41,7 +41,11 @@ router = APIRouter()
 REPORT_GENERATOR = "generate_structured_report"
 
 
-@router.get("/reports/{document_id}", response_class=HTMLResponse)
+@router.get(
+    "/reports/{document_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("decision:run"))],
+)
 async def report_detail(
     document_id: uuid.UUID,
     request: Request,

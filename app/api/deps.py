@@ -115,12 +115,23 @@ async def get_current_agent(
         )
     credential = authorization[7:].strip()
     try:
-        return await agents_service.authenticate_agent(db, credential=credential)
+        agent = await agents_service.authenticate_agent(db, credential=credential)
     except AgentError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
+
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == agent.tenant_id))
+    ).scalar_one_or_none()
+    if tenant is None or not tenant.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="tenant is disabled",
+        )
+
+    return agent
 
 
 CurrentAgent = Annotated[DBAgent, Depends(get_current_agent)]

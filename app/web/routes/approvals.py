@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.db.models.action import ActionRecord
 from app.db.session import get_db
 from app.services.actions import approval as approval_service
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.routes.scenarios import require_scenario_csrf
 from app.web.templating import base_context, templates
 from app.web.view_helpers import build_action_timeline
@@ -60,7 +60,11 @@ def _action_presentation(record: ActionRecord, viewer_user_id: uuid.UUID) -> dic
     }
 
 
-@router.get("/approvals", response_class=HTMLResponse)
+@router.get(
+    "/approvals",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("action:approve"))],
+)
 async def approvals_list(
     request: Request,
     user: HtmlUser,

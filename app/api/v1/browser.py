@@ -4,10 +4,11 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentTenantId, require_permission
+from app.api.deps import CurrentTenantId, require_csrf, require_permission
+from app.core.rate_limit import limiter
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.browser import (
@@ -28,10 +29,14 @@ router = APIRouter(prefix="/browser", tags=["browser"])
     "/sources/{source_id}/authorization",
     response_model=BrowserAuthorizationRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("30/minute")
 async def create_authorization(
+    request: Request,
     source_id: uuid.UUID,
     body: BrowserAuthorizationCreate,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("dataset:write"))],
@@ -82,9 +87,13 @@ async def list_authorizations(
 @router.delete(
     "/authorizations/{authorization_id}",
     response_model=BrowserAuthorizationRead,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("30/minute")
 async def revoke_authorization(
+    request: Request,
     authorization_id: uuid.UUID,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("dataset:write"))],
@@ -112,10 +121,14 @@ async def revoke_authorization(
     "/sources/{source_id}/profile",
     response_model=BrowserExtractionProfileRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("30/minute")
 async def create_profile(
+    request: Request,
     source_id: uuid.UUID,
     body: BrowserExtractionProfileCreate,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("dataset:write"))],
@@ -156,9 +169,13 @@ async def list_profiles(
 @router.patch(
     "/profiles/{profile_id}/status",
     response_model=BrowserExtractionProfileRead,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("30/minute")
 async def set_profile_status(
+    request: Request,
     profile_id: uuid.UUID,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("dataset:write"))],
@@ -182,9 +199,13 @@ async def set_profile_status(
     "/profiles/{profile_id}/extract",
     response_model=ScheduleExtractionResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("30/minute")
 async def schedule_extraction(
+    request: Request,
     profile_id: uuid.UUID,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("dataset:write"))],

@@ -43,6 +43,30 @@ from app.services.ingestion import service as ingestion_service
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
+_UPLOAD_CHUNK_BYTES = 64 * 1024
+
+
+async def _read_upload_with_limit(
+    file: UploadFile,
+    *,
+    max_bytes: int,
+) -> bytes:
+    """Read a bounded upload without buffering the entire payload in memory."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"file too large (max {max_bytes} bytes)",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 # ---------- admin-facing ----------
 
@@ -349,9 +373,10 @@ async def agent_upload_content(
     ).scalar_one_or_none()
 
     if browser_run is not None:
-        content = await file.read()
-        if len(content) > settings.browser_upload_max_bytes:
-            raise HTTPException(status_code=413, detail="snapshot too large")
+        content = await _read_upload_with_limit(
+            file,
+            max_bytes=settings.browser_upload_max_bytes,
+        )
         try:
             browser_ingestion_job = await browser_service.accept_upload(
                 db,
@@ -402,9 +427,10 @@ async def agent_upload_content(
             detail="no pending upload for this content hash",
         )
 
-    content = await file.read()
-    if len(content) > settings.agent_max_upload_bytes:
-        raise HTTPException(status_code=413, detail="file too large")
+    content = await _read_upload_with_limit(
+        file,
+        max_bytes=settings.agent_max_upload_bytes,
+    )
 
     actual_hash = hashlib.sha256(content).hexdigest()
     if actual_hash != content_hash:

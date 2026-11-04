@@ -125,6 +125,23 @@ async def _handle_one(
         await _audit_rejected(db, record=record, context=context)
         return record
 
+    granted_permissions = {p.key for role in user.roles for p in role.permissions}
+    if "action:propose" not in granted_permissions:
+        record.status = "rejected"
+        record.rejection_reason = "user lacks action:propose permission"
+        record.validation_result = {
+            "schema": {"passed": True},
+            "permission": {
+                "passed": False,
+                "scope": "rbac",
+                "rbac_checked": True,
+                "error": "missing action:propose permission",
+            },
+            "risk_level": action.risk_level,
+        }
+        await _audit_rejected(db, record=record, context=context)
+        return record
+
     # 4. Per-concern validators.
     validation_runs = run_validators(action.validators, payload, context)
     failed = next(

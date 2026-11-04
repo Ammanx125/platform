@@ -116,7 +116,9 @@ class SQLConnector:
             config = SQLSourceConfig.model_validate(source.config)
         except ValidationError as exc:
             raise IngestionError("invalid SQL source configuration") from exc
-        url, dialect = _connection_url(resolve(config.credential_ref))
+        url, dialect = _connection_url(
+            resolve(config.credential_ref, tenant_id=source.tenant_id)
+        )
         _validate_select_only(config.query, dialect=dialect)
         return config, url, dialect
 

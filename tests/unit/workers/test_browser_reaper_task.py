@@ -4,9 +4,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.core.config import settings
-from app.db.models.agent import Agent
+from app.db.models.agent import Agent, AgentJob
 from app.db.models.dataset import DataSource
 from app.db.session import SessionLocal
 from app.schemas.browser import BrowserExtractionProfileCreate
@@ -50,6 +51,11 @@ async def test_reaper_fails_expired_run(two_tenants):
         )
         await db.commit()
 
+        job.status = "in_progress"
+        job.claimed_at = datetime.now(UTC) - timedelta(
+            seconds=settings.browser_run_timeout_seconds + 60
+        )
+
         # Force the run to look old and stuck.
         run.status = "extracting"
         run.created_at = datetime.now(UTC) - timedelta(
@@ -65,3 +71,12 @@ async def test_reaper_fails_expired_run(two_tenants):
         await db.refresh(run)
         assert run.status == "failed"
         assert run.error == "run timed out"
+
+        async with SessionLocal() as db3:
+            persisted_job = (
+                await db3.execute(
+                    select(AgentJob).where(AgentJob.id == job.id)
+                )
+            ).scalar_one()
+            assert persisted_job.status == "failed"
+            assert persisted_job.error == "browser extraction run timed out"

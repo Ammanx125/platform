@@ -4,11 +4,12 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import CurrentTenantId, require_permission
+from app.api.deps import CurrentTenantId, require_csrf, require_permission
+from app.core.rate_limit import limiter
 from app.db.models.user import User
 from app.db.session import get_db
 from app.schemas.email import (
@@ -30,9 +31,13 @@ router = APIRouter(prefix="/email", tags=["email"])
     "/connect",
     response_model=EmailConnectResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("10/minute")
 async def start_connect(
+    request: Request,
     body: EmailConnectRequest,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     user: Annotated[User, Depends(require_permission("dataset:write"))],
@@ -74,9 +79,13 @@ async def list_accounts(
 @router.delete(
     "/accounts/{account_id}",
     response_model=EmailAccountRead,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("20/minute")
 async def disconnect_account(
+    request: Request,
     account_id: uuid.UUID,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     _user: Annotated[User, Depends(require_permission("dataset:write"))],
@@ -96,9 +105,13 @@ async def disconnect_account(
     "/accounts/{account_id}/sync",
     response_model=EmailSyncResponse,
     status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_csrf)],
 )
+@limiter.limit("20/minute")
 async def enqueue_sync(
+    request: Request,
     account_id: uuid.UUID,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     tenant_id: CurrentTenantId,
     _user: Annotated[User, Depends(require_permission("dataset:write"))],

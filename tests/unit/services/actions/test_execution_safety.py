@@ -80,6 +80,80 @@ async def test_verify_exception_does_not_strand_the_action(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_action_service_rejects_users_without_action_propose_permission(monkeypatch):
+    from app.services.actions import service as action_service
+    from app.services.actions.base import ActionContext
+
+    class _Tool:
+        name = "test_tool"
+        risk_level = "report"
+        parameters_model: Any
+
+        async def execute(self, *, db, payload, context):
+            raise AssertionError("must not execute")
+
+        async def verify(self, *, db, payload, context, result):
+            raise AssertionError("must not verify")
+
+    class _Params:
+        @classmethod
+        def model_validate(cls, value):
+            return value
+
+    _Tool.parameters_model = _Params
+
+    class _Result:
+        def __init__(self, row):
+            self._row = row
+
+        def scalar_one_or_none(self):
+            return self._row
+
+    tenant_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    class _Db:
+        def __init__(self):
+            self.user = SimpleNamespace(
+                id=user_id,
+                tenant_id=tenant_id,
+                is_active=True,
+                roles=[],
+            )
+
+        def add(self, record):
+            return None
+
+        async def execute(self, statement):
+            return _Result(self.user)
+
+        async def flush(self):
+            return None
+
+    async def _emit(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(action_service, "get_action", lambda name: _Tool())
+    monkeypatch.setattr(action_service, "emit_event", _emit)
+
+    record = await action_service._handle_one(
+        cast(AsyncSession, _Db()),
+        call=SimpleNamespace(name="test_tool", arguments={}, rationale=""),
+        context=ActionContext(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            decision_run_id=None,
+        ),
+    )
+
+    assert record.status == "rejected"
+    assert (
+        "action:propose" in (record.rejection_reason or "")
+        or "lacks" in (record.rejection_reason or "")
+    )
+
+
+@pytest.mark.asyncio
 async def test_execute_approved_refuses_a_disabled_tool(monkeypatch):
     """A tool switched off after approval must not run on approval."""
     from app.services.actions import policy as policy_service

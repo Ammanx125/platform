@@ -465,7 +465,8 @@
     <p class="row-secondary">Ask a question about your business data, recent anomalies, or decisions.</p>
   </div>
   <div class="ask-command-form">
-    <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-indicator">
+    <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-indicator"
+      hx-headers='{"{{ csrf_header_name }}": "{{ request.cookies.get(csrf_cookie_name) if request.cookies.get(csrf_cookie_name) else "" }}"}'>
       <input class="input" type="text" name="query" required autocomplete="off"
         placeholder="e.g. What changed in our latest operating results?">
       <button type="submit" class="btn btn-primary">Ask Sansa</button>

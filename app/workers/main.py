@@ -32,6 +32,18 @@ async def tick() -> None:
     for task in get_tasks():
         if not task.is_due(now):
             continue
+        if task.max_concurrency <= 0:
+            continue
+        if task.in_flight >= task.max_concurrency:
+            logger.warning(
+                "task %s skipped because %d/%d slots are already in flight",
+                task.name,
+                task.in_flight,
+                task.max_concurrency,
+            )
+            continue
+
+        task.in_flight += 1
         t0 = time.perf_counter()
         try:
             async with SessionLocal() as db:
@@ -46,6 +58,7 @@ async def tick() -> None:
             task.last_error = str(exc)[:300]
             logger.exception("task %s failed: %s", task.name, exc)
         finally:
+            task.in_flight -= 1
             task.last_run_at = time.monotonic()
             task.last_duration_ms = int((time.perf_counter() - t0) * 1000)
 

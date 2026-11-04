@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     # here is never legitimate.
     max_form_body_bytes: int = 1024 * 1024  # 1 MB
 
+    # Decision orchestration budgets. These are a low-friction guardrail to
+    # keep expensive agentic runs from outrunning tenant and user capacity.
+    decision_tenant_hourly_quota: int = 50
+    decision_user_hourly_quota: int = 10
+
     # Webhook encryption (see crypto decision)
     webhook_enc_key: str | None = None
 

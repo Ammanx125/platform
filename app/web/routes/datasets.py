@@ -14,13 +14,17 @@ from app.db.models.dataset import DataSource, IngestionJob
 from app.db.models.semantic import CanonicalConcept, SemanticMapping
 from app.db.models.understanding import DataProfile
 from app.db.session import get_db
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import base_context, templates
 
 router = APIRouter()
 
 
-@router.get("/datasets", response_class=HTMLResponse)
+@router.get(
+    "/datasets",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("dataset:read"))],
+)
 async def datasets_list(
     request: Request,
     user: HtmlUser,
@@ -74,7 +78,11 @@ async def datasets_list(
     )
 
 
-@router.get("/datasets/{dataset_id}", response_class=HTMLResponse)
+@router.get(
+    "/datasets/{dataset_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("dataset:read"))],
+)
 async def dataset_detail(
     dataset_id: uuid.UUID,
     request: Request,

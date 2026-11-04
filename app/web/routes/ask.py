@@ -14,6 +14,7 @@ from app.services.orchestration.report_builder import report_from_stored
 from app.services.orchestration.report_store import load_structured_report
 from app.services.workflows.registry import get as get_workflow
 from app.web.deps import HtmlUser, require_html_permission
+from app.web.routes.scenarios import require_scenario_csrf
 from app.web.templating import templates
 
 router = APIRouter()
@@ -22,7 +23,12 @@ router = APIRouter()
 @router.post(
     "/ask",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_html_permission("decision:run"))],
+    dependencies=[
+        Depends(require_html_permission("decision:run")),
+        # /ask runs the full orchestrator (LLM + tool auto-execution), so a
+        # cross-site POST would drive it with the ambient session cookie.
+        Depends(require_scenario_csrf),
+    ],
 )
 async def ask(
     request: Request,

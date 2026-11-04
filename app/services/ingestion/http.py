@@ -207,7 +207,7 @@ class HTTPConnector:
         auth_ref = cfg.get("auth_ref")
         if auth_ref:
             try:
-                secret = secrets.resolve(auth_ref)
+                secret = secrets.resolve(auth_ref, tenant_id=source.tenant_id)
             except secrets.SecretNotFound as exc:
                 raise IngestionError(str(exc)) from exc
             header_name = cfg.get("auth_header") or "Authorization"

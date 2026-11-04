@@ -22,6 +22,7 @@ from app.services.actions.base import (
     RISK_READ,
     RISK_REQUIRED,
 )
+from app.services.actions.registry import get as get_action
 
 # Effective policy values returned by resolve().
 POLICY_AUTO = "auto"
@@ -39,6 +40,33 @@ def _default_policy_for_risk(risk_level: str) -> str:
         return POLICY_AUTO
     # "report" and "configurable" default to auto.
     return POLICY_AUTO
+
+
+def _validate_override_for_risk(
+    tool_name: str,
+    tool_risk_level: str,
+    policy_override: str,
+) -> None:
+    """Reject tenant overrides that weaken a mandatory approval requirement."""
+    default_policy = _default_policy_for_risk(tool_risk_level)
+    if default_policy == POLICY_REQUIRE_APPROVAL and policy_override == POLICY_AUTO:
+        raise ValueError(
+            f"tool {tool_name!r} is marked {tool_risk_level!r}; "
+            "auto execution is not allowed because it weakens a required "
+            "approval gate"
+        )
+
+
+def _normalize_override_for_risk(
+    tool_name: str,
+    tool_risk_level: str,
+    policy_override: str,
+) -> str:
+    """Clamp stale or invalid overrides back to the minimum safe policy."""
+    default_policy = _default_policy_for_risk(tool_risk_level)
+    if default_policy == POLICY_REQUIRE_APPROVAL and policy_override == POLICY_AUTO:
+        return default_policy
+    return policy_override
 
 
 async def resolve(
@@ -62,7 +90,12 @@ async def resolve(
     ).scalar_one_or_none()
 
     if override is not None:
-        return override.policy_override
+        normalized = _normalize_override_for_risk(
+            tool_name=tool_name,
+            tool_risk_level=tool_risk_level,
+            policy_override=override.policy_override,
+        )
+        return normalized
     return _default_policy_for_risk(tool_risk_level)
 
 
@@ -89,6 +122,15 @@ async def set_override(
         raise ValueError(
             f"policy_override must be one of {sorted(VALID_OVERRIDES)}"
         )
+
+    action = get_action(tool_name)
+    if action is not None:
+        _validate_override_for_risk(
+            tool_name=tool_name,
+            tool_risk_level=action.risk_level,
+            policy_override=policy_override,
+        )
+
     existing = (
         await db.execute(
             select(TenantToolPolicy).where(

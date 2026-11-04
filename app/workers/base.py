@@ -28,10 +28,12 @@ class Task:
     interval_seconds: float
     run_once: Callable[[AsyncSession], Awaitable[int]]
     enabled: bool = True
+    max_concurrency: int = 1
     # Runtime bookkeeping; the loop updates these.
     last_run_at: float = field(default=0.0)
     last_duration_ms: int = field(default=0)
     last_error: str | None = None
+    in_flight: int = field(default=0)
 
     def is_due(self, now: float) -> bool:
         if not self.enabled:

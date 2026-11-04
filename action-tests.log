@@ -1,0 +1,167 @@
+.....F.....                                                              [100%]
+================================== FAILURES ===================================
+_____ test_action_service_rejects_users_without_action_propose_permission _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000001BCB98B5650>
+
+    @pytest.mark.asyncio
+    async def test_action_service_rejects_users_without_action_propose_permission(monkeypatch):
+        from app.services.actions import service as action_service
+        from app.services.actions.base import ActionContext
+    
+        class _Tool:
+            name = "test_tool"
+            risk_level = "report"
+            parameters_model: Any
+    
+            async def execute(self, *, db, payload, context):
+                raise AssertionError("must not execute")
+    
+            async def verify(self, *, db, payload, context, result):
+                raise AssertionError("must not verify")
+    
+        class _Params:
+            @classmethod
+            def model_validate(cls, value):
+                return value
+    
+        _Tool.parameters_model = _Params
+    
+        class _Result:
+            def __init__(self, row):
+                self._row = row
+    
+            def scalar_one_or_none(self):
+                return self._row
+    
+        tenant_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+    
+        class _Db:
+            def __init__(self):
+                self.user = SimpleNamespace(
+                    id=user_id,
+                    tenant_id=tenant_id,
+                    is_active=True,
+                    roles=[],
+                )
+    
+            def add(self, record):
+                return None
+    
+            async def execute(self, statement):
+                return _Result(self.user)
+    
+            async def flush(self):
+                return None
+    
+        monkeypatch.setattr(action_service, "get_action", lambda name: _Tool())
+        monkeypatch.setattr(action_service, "emit_event", lambda *args, **kwargs: None)
+    
+>       record = await action_service._handle_one(
+            cast(AsyncSession, _Db()),
+            call=SimpleNamespace(name="test_tool", arguments={}, rationale=""),
+            context=ActionContext(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                decision_run_id=None,
+            ),
+        )
+
+tests\unit\services\actions\test_execution_safety.py:136: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\services\actions\service.py:142: in _handle_one
+    await _audit_rejected(db, record=record, context=context)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+db = <test_execution_safety.test_action_service_rejects_users_without_action_propose_permission.<locals>._Db object at 0x000001BC9FE223C0>
+
+    async def _audit_rejected(
+        db: AsyncSession,
+        *,
+        record: ActionRecord,
+        context: ActionContext,
+    ) -> None:
+>       await emit_event(
+            db,
+            tenant_id=context.tenant_id,
+            event_type="action.rejected",
+            actor_user_id=context.user_id,
+            subject_type="action",
+            subject_id=record.id,
+            metadata={
+                "tool_name": record.tool_name,
+                "reason": record.rejection_reason,
+            },
+            message=record.rejection_reason,
+        )
+E       TypeError: 'NoneType' object can't be awaited
+
+app\services\actions\service.py:477: TypeError
+============================== warnings summary ===============================
+.venv\Lib\site-packages\slowapi\extension.py:720: 12 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\slowapi\extension.py:720: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(func):
+
+tests/unit/actions/test_policy.py::test_default_for_read_is_auto
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:1216: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    return asyncio.get_event_loop_policy()
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:874: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    _restore_event_loop_policy(asyncio.get_event_loop_policy()),
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:772: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    old_loop_policy = asyncio.get_event_loop_policy()
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:777: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(policy)
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:1183: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:889: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:794: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(old_loop_policy)
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:942: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:966: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(previous_policy)
+
+tests/unit/actions/test_policy.py: 4 warnings
+tests/unit/services/actions/test_execution_safety.py: 3 warnings
+tests/unit/services/actions/test_idempotency.py: 4 warnings
+  C:\Users\LocalAdmin\Documents\platform\.venv\Lib\site-packages\pytest_asyncio\plugin.py:978: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/services/actions/test_execution_safety.py::test_action_service_rejects_users_without_action_propose_permission
+1 failed, 10 passed, 112 warnings in 0.35s

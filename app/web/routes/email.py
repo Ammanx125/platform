@@ -10,13 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.services.email import service as email_service
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import base_context, templates
 
 router = APIRouter()
 
 
-@router.get("/email", response_class=HTMLResponse)
+@router.get(
+    "/email",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("dataset:read"))],
+)
 async def email_overview(
     request: Request,
     user: HtmlUser,
@@ -38,7 +42,11 @@ async def email_overview(
     )
 
 
-@router.get("/email/accounts/{account_id}", response_class=HTMLResponse)
+@router.get(
+    "/email/accounts/{account_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("dataset:read"))],
+)
 async def email_account_detail(
     account_id: uuid.UUID,
     request: Request,
@@ -78,7 +86,11 @@ async def email_account_detail(
     )
 
 
-@router.get("/email/connect/error", response_class=HTMLResponse)
+@router.get(
+    "/email/connect/error",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("dataset:read"))],
+)
 async def email_connect_error(
     request: Request,
     user: HtmlUser,

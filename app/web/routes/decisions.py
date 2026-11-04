@@ -16,13 +16,17 @@ from app.services.orchestration.report_store import (
     find_structured_report_document_id,
     load_structured_report,
 )
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import base_context, templates
 
 router = APIRouter()
 
 
-@router.get("/decisions", response_class=HTMLResponse)
+@router.get(
+    "/decisions",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("decision:run"))],
+)
 async def decisions_list(
     request: Request,
     user: HtmlUser,
@@ -50,7 +54,11 @@ async def decisions_list(
     )
 
 
-@router.get("/decisions/{decision_id}", response_class=HTMLResponse)
+@router.get(
+    "/decisions/{decision_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("decision:run"))],
+)
 async def decision_detail(
     decision_id: uuid.UUID,
     request: Request,

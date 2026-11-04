@@ -9,12 +9,16 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.core.security import generate_refresh_token, hash_password, hash_refresh_token
+from app.db.models.agent import Agent
+from app.db.models.dataset import DataSource
 from app.db.models.decision import DecisionRun
 from app.db.models.refresh_token import RefreshToken
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.seed import seed_tenant_roles
 from app.db.session import SessionLocal
+from app.services.agents import service as agents_service
+from app.services.agents.service import AgentError
 
 
 def _csrf(client: AsyncClient) -> dict[str, str]:
@@ -52,6 +56,43 @@ async def _set_tenant_active(tenant_id, active: bool) -> None:
         ).scalar_one()
         tenant.is_active = active
         await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_browser_authorization_requires_csrf(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    email = await _make_user(two_tenants["tenant_a"], role="analyst")
+    await _login(client, email, "Passw0rd")
+
+    async with SessionLocal() as db:
+        source = DataSource(
+            tenant_id=two_tenants["tenant_a"],
+            name="demo-agent-source",
+            source_type="agent",
+        )
+        db.add(source)
+        await db.commit()
+        source_id = source.id
+
+    payload = {
+        "origin": "https://erp.example.com",
+        "approved_purpose": "customer portal access",
+        "scope": {"read": True},
+    }
+
+    no_csrf = await client.post(
+        f"/api/v1/browser/sources/{source_id}/authorization",
+        json=payload,
+    )
+    assert no_csrf.status_code == 403
+
+    ok = await client.post(
+        f"/api/v1/browser/sources/{source_id}/authorization",
+        json=payload,
+        headers=_csrf(client),
+    )
+    assert ok.status_code == 201
 
 
 # ---------- RBAC on /ask ----------
@@ -118,7 +159,58 @@ async def test_analyst_can_run_a_decision(
     assert response.status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_viewer_is_blocked_from_decision_history_html(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    email = await _make_user(two_tenants["tenant_a"], role="viewer")
+    await _login(client, email, "Passw0rd")
+
+    response = await client.get("/decisions")
+
+    assert response.status_code == 403
+    assert "decision:run" in response.text
+
+
 # ---------- tenant suspension ----------
+
+@pytest.mark.asyncio
+async def test_disabled_tenant_rejects_agent_credentials(
+    two_tenants: dict,
+) -> None:
+    async with SessionLocal() as db:
+        source = DataSource(
+            tenant_id=two_tenants["tenant_a"],
+            name="demo-agent-source",
+            source_type="agent",
+        )
+        db.add(source)
+        await db.flush()
+
+        secret = "agent-demo-secret"
+        agent = Agent(
+            tenant_id=two_tenants["tenant_a"],
+            name="demo-agent",
+            source_id=source.id,
+            status="active",
+            credential_hash=agents_service._hash(secret),
+        )
+        db.add(agent)
+        await db.commit()
+
+        active = await agents_service.authenticate_agent(db, credential=secret)
+        assert active.id == agent.id
+
+        tenant = (
+            await db.execute(
+                select(Tenant).where(Tenant.id == two_tenants["tenant_a"])
+            )
+        ).scalar_one()
+        tenant.is_active = False
+        await db.commit()
+
+        with pytest.raises(AgentError, match="tenant is disabled"):
+            await agents_service.authenticate_agent(db, credential=secret)
 
 
 @pytest.mark.asyncio

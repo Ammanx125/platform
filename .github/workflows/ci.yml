@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: sansa_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d sansa_test"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/sansa_test
+      JWT_SECRET: 0123456789abcdef0123456789abcdef
+      ENVIRONMENT: development
+      REDIS_URL: ""
+      APP_NAME: Sansa
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install ruff mypy pytest pytest-asyncio
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Type-check
+        run: mypy app
+
+      - name: Test suite
+        run: pytest -q
+
+      - name: Migration check
+        run: alembic upgrade head
+
+      - name: Build check
+        run: python -m compileall app
+
+      - name: Deployment smoke check
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 > /tmp/sansa-smoke.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8001/health >/tmp/sansa-health.txt; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8001/health
+          curl -fsS http://127.0.0.1:8001/health/db

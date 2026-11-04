@@ -1,7 +1,26 @@
-.PHONY: worker worker-once
+.PHONY: worker worker-once ci deploy-check
 
 worker:
 	python -m app.workers.main
+
+ci:
+	$(PYTHON) -m pip install --upgrade pip
+	$(PYTHON) -m pip install -e .
+	$(PYTHON) -m pip install ruff mypy pytest pytest-asyncio
+	ruff check .
+	mypy app
+	pytest -q
+	$(PYTHON) -m alembic upgrade head
+	$(PYTHON) -m compileall app
+
+deploy-check:
+	$(PYTHON) -m compileall app
+	$(PYTHON) -m uvicorn app.main:app --host 127.0.0.1 --port 8001 > /tmp/sansa-smoke.log 2>&1 &
+	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do \
+		curl -fsS http://127.0.0.1:8001/health >/tmp/sansa-health.txt && break || sleep 2; \
+	done
+	curl -fsS http://127.0.0.1:8001/health
+	curl -fsS http://127.0.0.1:8001/health/db
 
 # keep the old target for backwards compat if you like
 worker-legacy:

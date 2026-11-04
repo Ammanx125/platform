@@ -76,7 +76,10 @@ async def dispatch_once(db: AsyncSession, *, batch: int = 10) -> int:
             event.processed_at = now
             event.error = "no system user for tenant"
             dispatched += 1
-            continue
+            # `continue` would skip the flush at the bottom of the loop, leaving
+            # the status change pending in the session (and silently dropped on
+            # a later rollback). Break out to the flush instead.
+            break
 
         for trigger in matched:
             claimed = await _try_claim_trigger(

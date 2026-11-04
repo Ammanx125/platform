@@ -3,6 +3,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.db.models.audit import AuditEvent
 from app.db.session import SessionLocal
 from app.services.audit import types as audit_types
@@ -105,3 +106,27 @@ async def test_tenant_isolation(client: AsyncClient, two_tenants: dict) -> None:
     await _login(client, two_tenants["email_b"], two_tenants["password"])
     r = await client.get(f"/api/v1/decisions/{decision_id}")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_decision_user_quota_is_enforced(
+    client: AsyncClient, two_tenants: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "decision_user_hourly_quota", 1)
+    monkeypatch.setattr(settings, "decision_tenant_hourly_quota", 10)
+    await _login(client, two_tenants["email_a"], two_tenants["password"])
+
+    r = await client.post(
+        "/api/v1/decisions",
+        json={"query": "First decision"},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.post(
+        "/api/v1/decisions",
+        json={"query": "Second decision"},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 429, r.text
+    assert "quota exceeded" in r.json()["detail"].lower()

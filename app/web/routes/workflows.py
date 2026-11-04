@@ -13,14 +13,18 @@ from app.db.models.workflow import WorkflowInstance
 from app.db.session import get_db
 from app.services.workflows.registry import all_workflows
 from app.services.workflows.registry import get as get_workflow
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import base_context, templates
 from app.web.view_helpers import build_timeline
 
 router = APIRouter()
 
 
-@router.get("/workflows", response_class=HTMLResponse)
+@router.get(
+    "/workflows",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("knowledge:read"))],
+)
 async def workflows_list(
     request: Request,
     user: HtmlUser,
@@ -39,7 +43,11 @@ async def workflows_list(
     )
 
 
-@router.get("/workflows/instances", response_class=HTMLResponse)
+@router.get(
+    "/workflows/instances",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("knowledge:read"))],
+)
 async def instances_list(
     request: Request,
     user: HtmlUser,
@@ -76,7 +84,11 @@ async def instances_list(
     )
 
 
-@router.get("/workflows/instances/{instance_id}", response_class=HTMLResponse)
+@router.get(
+    "/workflows/instances/{instance_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("knowledge:read"))],
+)
 async def instance_detail(
     instance_id: uuid.UUID,
     request: Request,

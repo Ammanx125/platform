@@ -698,8 +698,29 @@ async def reap_stale_runs(
     rows = list((await db.execute(stmt)).scalars().all())
 
     for run in rows:
-        run.status = "failed"
-        run.error = "run timed out"
+        try:
+            await fail_run(
+                db,
+                tenant_id=run.tenant_id,
+                run_id=run.id,
+                error="run timed out",
+            )
+        except BrowserServiceError:
+            continue
+
+        agent_job = (
+            await db.execute(
+                select(AgentJob).where(
+                    AgentJob.id == run.agent_job_id,
+                    AgentJob.tenant_id == run.tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if agent_job is not None and agent_job.status == "in_progress":
+            agent_job.status = "failed"
+            agent_job.error = "browser extraction run timed out"
+            agent_job.finished_at = datetime.now(UTC)
+
     if rows:
         await db.flush()
 

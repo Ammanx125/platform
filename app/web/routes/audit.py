@@ -11,13 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.services.audit import service as audit_service
 from app.services.audit.types import ALL_AUDIT_EVENT_TYPES
-from app.web.deps import HtmlUser
+from app.web.deps import HtmlUser, require_html_permission
 from app.web.templating import base_context, templates
 
 router = APIRouter()
 
 
-@router.get("/audit", response_class=HTMLResponse)
+@router.get(
+    "/audit",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_html_permission("audit:read"))],
+)
 async def audit_list(
     request: Request,
     user: HtmlUser,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,43 @@ async def test_sql_connector_applies_configured_row_limit(
     assert len(result.rows) == 1
     assert result.errors == [{"error": "row limit reached", "limit": 1}]
     assert result.metadata.row_count_hint is None
+
+
+@pytest.mark.asyncio
+async def test_sql_connector_uses_tenant_scoped_secret_namespaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant_id = uuid.uuid4()
+    database_path = tmp_path / "tenant-source.db"
+    setup_engine = create_async_engine(
+        f"sqlite+aiosqlite:///{database_path.as_posix()}"
+    )
+    async with setup_engine.begin() as connection:
+        await connection.execute(text("CREATE TABLE ledger (id INTEGER)"))
+        await connection.execute(text("INSERT INTO ledger VALUES (1), (2)"))
+    await setup_engine.dispose()
+
+    namespaced = (
+        f"sqlite+aiosqlite:///file:{database_path.as_posix()}"
+        "?mode=ro&uri=true"
+    )
+    env_name = f"SANSA_SECRET_{str(tenant_id).upper().replace('-', '_')}_TEST_SQL"
+    monkeypatch.setenv(env_name, namespaced)
+    source = DataSource(
+        tenant_id=tenant_id,
+        name="Scoped SQL source",
+        source_type="sql",
+        config={
+            "credential_ref": "TEST_SQL",
+            "query": "SELECT id FROM ledger ORDER BY id",
+            "row_limit": 10,
+        },
+    )
+
+    result = await SQLConnector().ingest(source=source)
+
+    assert [row.data for row in result.rows] == [{"id": 1}, {"id": 2}]
+    assert result.errors == []
 
 
 @pytest.mark.asyncio
