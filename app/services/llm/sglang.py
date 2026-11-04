@@ -166,7 +166,8 @@ class SGLangProvider:
             )
         return content
 
-    def _parse_content_json(self, content: str) -> dict[str, Any]:
+    @staticmethod
+    def _parse_content_json(content: str) -> dict[str, Any]:
         """
         Parse the assistant content as JSON.
 

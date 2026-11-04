@@ -62,8 +62,8 @@ class SendEmailAction:
     parameters_model = SendEmailParams
     validators = [validate_evidence_cited, validate_draft_id_shape]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: SendEmailParams,
@@ -107,8 +107,8 @@ class SendEmailAction:
             "provider": account.provider,
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: SendEmailParams,

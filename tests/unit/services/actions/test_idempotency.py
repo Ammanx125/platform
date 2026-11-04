@@ -28,7 +28,8 @@ class _Tool:
         self.sends += 1
         return ActionResult(output={"provider_id": "m-1"})
 
-    async def verify(self, *, db, payload, context, result):
+    @staticmethod
+    async def verify(*, db, payload, context, result):
         return VerificationOutcome(verified=True, detail={"found": True})
 
 

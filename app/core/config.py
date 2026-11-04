@@ -43,58 +43,62 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_jwt_secret_length(self) -> "Settings":
-        if len(self.jwt_secret.encode("utf-8")) < 32:
+        return self._validate_runtime_settings(self)
+
+    @staticmethod
+    def _validate_runtime_settings(settings_obj: "Settings") -> "Settings":
+        if len(settings_obj.jwt_secret.encode("utf-8")) < 32:
             raise ValueError("JWT_SECRET must be at least 32 bytes")
         if (
-            self.environment.lower() in {"prod", "production"}
-            and not self.cookie_secure
+            settings_obj.environment.lower() in {"prod", "production"}
+            and not settings_obj.cookie_secure
         ):
             raise ValueError(
                 "COOKIE_SECURE must be true in production environments"
             )
-        if self.environment.lower() in {"prod", "production"}:
-            if not self.google_oauth_client_id:
+        if settings_obj.environment.lower() in {"prod", "production"}:
+            if not settings_obj.google_oauth_client_id:
                 raise ValueError(
                     "GOOGLE_OAUTH_CLIENT_ID is required in production"
                 )
-            if not self.google_oauth_client_secret:
+            if not settings_obj.google_oauth_client_secret:
                 raise ValueError(
                     "GOOGLE_OAUTH_CLIENT_SECRET is required in production"
                 )
-            if not self.email_oauth_redirect_uri.startswith("https://"):
+            if not settings_obj.email_oauth_redirect_uri.startswith("https://"):
                 raise ValueError(
                     "EMAIL_OAUTH_REDIRECT_URI must be https in production"
                 )
-        if self.redis_url == "":
-            self.redis_url = None
-        if self.redis_url is not None:
-            redis_parts = urlsplit(self.redis_url)
+        if settings_obj.redis_url == "":
+            settings_obj.redis_url = None
+        if settings_obj.redis_url is not None:
+            redis_parts = urlsplit(settings_obj.redis_url)
             if redis_parts.scheme not in {"redis", "rediss"} or not redis_parts.netloc:
                 raise ValueError("REDIS_URL must include a redis:// or rediss:// host")
         if (
-            self.environment.lower() in {"prod", "production"}
-            and self.redis_url is None
+            settings_obj.environment.lower() in {"prod", "production"}
+            and settings_obj.redis_url is None
         ):
             raise ValueError("REDIS_URL is required in production environments")
-        if self.sql_row_limit < 1 or self.sql_timeout_seconds < 1:
+        if settings_obj.sql_row_limit < 1 or settings_obj.sql_timeout_seconds < 1:
             raise ValueError("SQL row limit and timeout must be positive")
-        if self.sql_stream_batch_size < 1:
+        if settings_obj.sql_stream_batch_size < 1:
             raise ValueError("SQL_STREAM_BATCH_SIZE must be positive")
-        if self.retrieval_sql_candidate_limit < 1:
+        if settings_obj.retrieval_sql_candidate_limit < 1:
             raise ValueError("RETRIEVAL_SQL_CANDIDATE_LIMIT must be positive")
         if (
-            self.customer_behavior_recent_days < 1
-            or self.customer_behavior_at_risk_days < self.customer_behavior_recent_days
-            or self.customer_behavior_inactive_days < self.customer_behavior_at_risk_days
-            or self.customer_behavior_min_purchase_count < 1
-            or self.customer_behavior_champion_purchase_count
-            < self.customer_behavior_min_purchase_count
-            or self.customer_behavior_trend_threshold_pct <= 0
-            or not 0 < self.customer_behavior_high_value_percentile <= 100
-            or self.customer_behavior_row_limit < 1
+            settings_obj.customer_behavior_recent_days < 1
+            or settings_obj.customer_behavior_at_risk_days < settings_obj.customer_behavior_recent_days
+            or settings_obj.customer_behavior_inactive_days < settings_obj.customer_behavior_at_risk_days
+            or settings_obj.customer_behavior_min_purchase_count < 1
+            or settings_obj.customer_behavior_champion_purchase_count
+            < settings_obj.customer_behavior_min_purchase_count
+            or settings_obj.customer_behavior_trend_threshold_pct <= 0
+            or not 0 < settings_obj.customer_behavior_high_value_percentile <= 100
+            or settings_obj.customer_behavior_row_limit < 1
         ):
             raise ValueError("customer behavior thresholds and row limit are invalid")
-        return self
+        return settings_obj
 
     # Storage
     upload_dir: str = "./data/uploads"

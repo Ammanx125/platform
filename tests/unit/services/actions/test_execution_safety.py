@@ -22,10 +22,12 @@ async def test_verify_exception_does_not_strand_the_action(monkeypatch):
         name = "test_boom"
         risk_level = "report"
 
-        async def execute(self, *, db, payload, context):
+        @staticmethod
+        async def execute(*, db, payload, context):
             return ActionResult(output={"ok": True})
 
-        async def verify(self, *, db, payload, context, result):
+        @staticmethod
+        async def verify(*, db, payload, context, result):
             raise RuntimeError("provider timed out")
 
     class _Ctx:
@@ -61,7 +63,8 @@ async def test_verify_exception_does_not_strand_the_action(monkeypatch):
     class _Db:
         flush = staticmethod(_flush)
 
-        async def commit(self):
+        @staticmethod
+        async def commit():
             return None
 
     monkeypatch.setattr(action_service, "emit_event", _emit)
@@ -84,15 +87,26 @@ async def test_action_service_rejects_users_without_action_propose_permission(mo
     from app.services.actions import service as action_service
     from app.services.actions.base import ActionContext
 
+    fake_user = SimpleNamespace(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        is_active=True,
+        roles=[],
+    )
+    tenant_id = fake_user.tenant_id
+    user_id = fake_user.id
+
     class _Tool:
         name = "test_tool"
         risk_level = "report"
         parameters_model: Any
 
-        async def execute(self, *, db, payload, context):
+        @staticmethod
+        async def execute(*, db, payload, context):
             raise AssertionError("must not execute")
 
-        async def verify(self, *, db, payload, context, result):
+        @staticmethod
+        async def verify(*, db, payload, context, result):
             raise AssertionError("must not verify")
 
     class _Params:
@@ -109,25 +123,17 @@ async def test_action_service_rejects_users_without_action_propose_permission(mo
         def scalar_one_or_none(self):
             return self._row
 
-    tenant_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-
     class _Db:
-        def __init__(self):
-            self.user = SimpleNamespace(
-                id=user_id,
-                tenant_id=tenant_id,
-                is_active=True,
-                roles=[],
-            )
-
-        def add(self, record):
+        @staticmethod
+        def add(record):
             return None
 
-        async def execute(self, statement):
-            return _Result(self.user)
+        @staticmethod
+        async def execute(statement):
+            return _Result(fake_user)
 
-        async def flush(self):
+        @staticmethod
+        async def flush():
             return None
 
     async def _emit(*args, **kwargs):
@@ -160,18 +166,20 @@ async def test_execute_approved_refuses_a_disabled_tool(monkeypatch):
     from app.services.actions import service as action_service
     from app.services.actions.base import ActionResult
 
+    execution_calls: list[bool] = []
+
     class _Tool:
         name = "test_tool"
         risk_level = "report"
         parameters_model: Any
 
-        executed = False
-
-        async def execute(self, *, db, payload, context):
-            type(self).executed = True
+        @staticmethod
+        async def execute(*, db, payload, context):
+            execution_calls.append(True)
             return ActionResult(output={})
 
-        async def verify(self, *, db, payload, context, result):
+        @staticmethod
+        async def verify(*, db, payload, context, result):
             raise AssertionError("must not verify")
 
     class _Params:
@@ -202,7 +210,8 @@ async def test_execute_approved_refuses_a_disabled_tool(monkeypatch):
         return policy_service.POLICY_DISABLED
 
     class _Db:
-        async def flush(self):
+        @staticmethod
+        async def flush():
             return None
 
     monkeypatch.setattr(action_service, "get_action", lambda name: _Tool())
@@ -215,6 +224,6 @@ async def test_execute_approved_refuses_a_disabled_tool(monkeypatch):
         actor_user_id=uuid.uuid4(),
     )
 
-    assert _Tool.executed is False
+    assert execution_calls == []
     assert result.status == "failed"
     assert "disabled by tenant policy" in (result.error_message or "")

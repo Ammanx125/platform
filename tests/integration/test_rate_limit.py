@@ -52,7 +52,8 @@ async def test_production_startup_pings_and_closes_redis(
     class FakeRedis:
         closed = False
 
-        async def ping(self) -> bool:
+        @staticmethod
+        async def ping() -> bool:
             return True
 
         async def aclose(self) -> None:
@@ -76,7 +77,8 @@ async def test_production_startup_fails_when_redis_is_unavailable(
     class UnavailableRedis:
         closed = False
 
-        async def ping(self) -> bool:
+        @staticmethod
+        async def ping() -> bool:
             raise OSError("connection refused")
 
         async def aclose(self) -> None:

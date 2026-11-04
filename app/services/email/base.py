@@ -123,27 +123,28 @@ class EmailProvider(Protocol):
     """
     name: str  # "gmail" | "graph"
 
+    @staticmethod
     async def build_authorize_url(
-        self,
         *,
         state: str,
         redirect_uri: str,
     ) -> str: ...
 
+    @staticmethod
     async def exchange_code(
-        self,
         *,
         code: str,
         redirect_uri: str,
     ) -> OAuthTokenSet: ...
 
+    @staticmethod
     async def refresh_tokens(
-        self,
         *,
         tokens: OAuthTokenSet,
     ) -> OAuthTokenSet: ...
 
-    async def revoke_tokens(self, *, tokens: OAuthTokenSet) -> None: ...
+    @staticmethod
+    async def revoke_tokens(*, tokens: OAuthTokenSet) -> None: ...
 
     async def get_profile(
         self, *, tokens: OAuthTokenSet

@@ -43,22 +43,27 @@ class Logger:
     def __init__(self) -> None:
         self.step = 0
 
-    def header(self, text: str) -> None:
+    @staticmethod
+    def header(text: str) -> None:
         print()
         print("=" * 72)
         print(text)
         print("=" * 72)
 
-    def info(self, text: str) -> None:
+    @staticmethod
+    def info(text: str) -> None:
         print(f"  {text}")
 
-    def ok(self, text: str) -> None:
+    @staticmethod
+    def ok(text: str) -> None:
         print(f"  ✓ {text}")
 
-    def warn(self, text: str) -> None:
+    @staticmethod
+    def warn(text: str) -> None:
         print(f"  ! {text}")
 
-    def fail(self, text: str) -> None:
+    @staticmethod
+    def fail(text: str) -> None:
         print(f"  ✗ {text}", file=sys.stderr)
 
     def step_header(self, text: str) -> None:

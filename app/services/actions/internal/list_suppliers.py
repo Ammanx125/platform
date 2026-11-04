@@ -51,8 +51,8 @@ class ListSuppliersAction:
     parameters_model = ListSuppliersParams
     validators = [validate_supplier_limit]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: ListSuppliersParams,
@@ -86,8 +86,8 @@ class ListSuppliersAction:
             "suppliers": suppliers,
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: ListSuppliersParams,

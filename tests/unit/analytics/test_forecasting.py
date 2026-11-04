@@ -12,11 +12,16 @@ from app.services.analytics.series import TimeSeries, TimeSeriesPoint
 
 class _DBStub:
     """A no-op session stub — persist=False in these tests."""
-    async def execute(self, *a, **k):
+    @staticmethod
+    async def execute(*a, **k):
         raise AssertionError("db should not be touched")
-    def add(self, *a, **k):
+
+    @staticmethod
+    def add(*a, **k):
         raise AssertionError("db should not be touched")
-    async def flush(self):
+
+    @staticmethod
+    async def flush():
         raise AssertionError("db should not be touched")
 
 

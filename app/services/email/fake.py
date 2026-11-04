@@ -236,10 +236,12 @@ class FakeEmailProvider:
         self._drafts: dict[str, dict[str, Any]] = {}
         self._sent: dict[str, SendResult] = {}
 
-    async def build_authorize_url(self, *, state: str, redirect_uri: str) -> str:
+    @staticmethod
+    async def build_authorize_url(*, state: str, redirect_uri: str) -> str:
         return f"https://fake.example/oauth?state={state}&redirect_uri={redirect_uri}"
 
-    async def exchange_code(self, *, code: str, redirect_uri: str) -> OAuthTokenSet:
+    @staticmethod
+    async def exchange_code(*, code: str, redirect_uri: str) -> OAuthTokenSet:
         if not code:
             raise EmailAuthError("empty authorization code")
         return OAuthTokenSet(
@@ -249,7 +251,8 @@ class FakeEmailProvider:
             scope="fake.scope",
         )
 
-    async def refresh_tokens(self, *, tokens: OAuthTokenSet) -> OAuthTokenSet:
+    @staticmethod
+    async def refresh_tokens(*, tokens: OAuthTokenSet) -> OAuthTokenSet:
         return OAuthTokenSet(
             access_token="fake-access-token-refreshed",
             refresh_token=tokens.refresh_token,
@@ -258,7 +261,8 @@ class FakeEmailProvider:
             token_type=tokens.token_type,
         )
 
-    async def revoke_tokens(self, *, tokens: OAuthTokenSet) -> None:
+    @staticmethod
+    async def revoke_tokens(*, tokens: OAuthTokenSet) -> None:
         return None
 
     async def get_profile(self, *, tokens: OAuthTokenSet) -> dict[str, Any]:

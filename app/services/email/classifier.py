@@ -109,8 +109,8 @@ class EmailClassification:
 class EmailClassifier(Protocol):
     name: str
 
+    @staticmethod
     def classify(
-        self,
         *,
         subject: str,
         body_text: str,
@@ -210,8 +210,8 @@ class KeywordClassifier:
     """
     name = CLASSIFIER_VERSION
 
+    @staticmethod
     def classify(
-        self,
         *,
         subject: str,
         body_text: str,

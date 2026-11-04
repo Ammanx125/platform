@@ -100,8 +100,8 @@ class GenerateStructuredReportAction:
             }
         )
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: GenerateStructuredReportParams,

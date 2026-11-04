@@ -48,8 +48,8 @@ class CapabilityError(Exception):
 class Capability(Protocol):
     name: str
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -64,8 +64,8 @@ class Capability(Protocol):
 class RetrievalCapability:
     name = "retrieval"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -113,8 +113,8 @@ class RetrievalCapability:
 class KPICapability:
     name = "kpi"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -215,8 +215,8 @@ async def _infer_kpi_keys(db: AsyncSession, query: str) -> list[str]:
 class AnomalyCapability:
     name = "anomaly"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -283,8 +283,8 @@ async def _infer_detector_keys(db: AsyncSession, query: str) -> list[str]:
 class ForecastCapability:
     name = "forecast"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -357,8 +357,8 @@ class ForecastCapability:
 class CustomerBehaviorCapability:
     name = "customer_behavior"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -423,8 +423,8 @@ class EmailSummaryCapability:
     """
     name = "email_summary"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,
@@ -514,8 +514,8 @@ class WorkflowCapability:
     """
     name = "workflow"
 
+    @staticmethod
     async def run(
-        self,
         *,
         db: AsyncSession,
         tenant_id: uuid.UUID,

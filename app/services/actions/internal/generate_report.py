@@ -58,8 +58,8 @@ class GenerateReportAction:
     parameters_model = GenerateReportParams
     validators = [validate_evidence_cited, validate_report_shape]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: GenerateReportParams,
@@ -88,8 +88,8 @@ class GenerateReportAction:
             "chunk_count": doc.chunk_count,
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: GenerateReportParams,

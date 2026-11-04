@@ -46,8 +46,8 @@ class ListAnomaliesAction:
     parameters_model = ListAnomaliesParams
     validators = [validate_anomaly_filter]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: ListAnomaliesParams,
@@ -75,8 +75,8 @@ class ListAnomaliesAction:
             ],
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: ListAnomaliesParams,

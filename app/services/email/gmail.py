@@ -185,8 +185,9 @@ class GmailProvider:
 
     # ---------- OAuth ----------
 
+    @staticmethod
     async def build_authorize_url(
-        self, *, state: str, redirect_uri: str
+        *, state: str, redirect_uri: str
     ) -> str:
         cid, _ = _require_client_config()
         scopes = " ".join(settings.google_oauth_scopes)
@@ -204,12 +205,16 @@ class GmailProvider:
         }
         return f"{_AUTH_URI}?{urlencode(params)}"
 
+    @staticmethod
     async def exchange_code(
-        self, *, code: str, redirect_uri: str
+        *, code: str, redirect_uri: str
     ) -> OAuthTokenSet:
-        return await asyncio.to_thread(self._exchange_code_sync, code, redirect_uri)
+        return await asyncio.to_thread(
+            GmailProvider._exchange_code_sync, code, redirect_uri
+        )
 
-    def _exchange_code_sync(self, code: str, redirect_uri: str) -> OAuthTokenSet:
+    @staticmethod
+    def _exchange_code_sync(code: str, redirect_uri: str) -> OAuthTokenSet:
         cid, csecret = _require_client_config()
         from google_auth_oauthlib.flow import Flow
 
@@ -232,10 +237,12 @@ class GmailProvider:
             raise EmailAuthError("OAuth flow returned unsupported credentials")
         return _tokens_from_credentials(flow.credentials)
 
-    async def refresh_tokens(self, *, tokens: OAuthTokenSet) -> OAuthTokenSet:
-        return await asyncio.to_thread(self._refresh_sync, tokens)
+    @staticmethod
+    async def refresh_tokens(*, tokens: OAuthTokenSet) -> OAuthTokenSet:
+        return await asyncio.to_thread(GmailProvider._refresh_sync, tokens)
 
-    def _refresh_sync(self, tokens: OAuthTokenSet) -> OAuthTokenSet:
+    @staticmethod
+    def _refresh_sync(tokens: OAuthTokenSet) -> OAuthTokenSet:
         creds = _credentials_from_tokens(tokens)
         try:
             creds.refresh(GoogleRequest())
@@ -246,10 +253,12 @@ class GmailProvider:
             creds, previous_refresh_token=tokens.refresh_token
         )
 
-    async def revoke_tokens(self, *, tokens: OAuthTokenSet) -> None:
-        await asyncio.to_thread(self._revoke_sync, tokens)
+    @staticmethod
+    async def revoke_tokens(*, tokens: OAuthTokenSet) -> None:
+        await asyncio.to_thread(GmailProvider._revoke_sync, tokens)
 
-    def _revoke_sync(self, tokens: OAuthTokenSet) -> None:
+    @staticmethod
+    def _revoke_sync(tokens: OAuthTokenSet) -> None:
         import urllib.request
 
         target = tokens.refresh_token or tokens.access_token
@@ -533,11 +542,13 @@ class GmailProvider:
 
     # ---------- helpers ----------
 
-    def _service(self, tokens: OAuthTokenSet):
+    @staticmethod
+    def _service(tokens: OAuthTokenSet):
         creds = _credentials_from_tokens(tokens)
         return google_build("gmail", "v1", credentials=creds, cache_discovery=False)
 
-    def _message_to_fetched(self, msg: dict[str, Any]) -> FetchedEmail:
+    @staticmethod
+    def _message_to_fetched(msg: dict[str, Any]) -> FetchedEmail:
         payload = msg.get("payload", {})
         headers = payload.get("headers", []) or []
         from_addr, from_name = _parse_address(_header(headers, "From"))

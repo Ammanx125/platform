@@ -121,16 +121,16 @@ class Action(Protocol):
     parameters_model: ClassVar[type[BaseModel]]
     validators: ClassVar[list[Validator]]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,                       # AsyncSession; typed Any to keep base.py free of SQLAlchemy
         payload: BaseModel,
         context: ActionContext,
     ) -> ActionResult: ...
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: BaseModel,

@@ -54,8 +54,8 @@ class MappingProposal:
 
 
 class SemanticMatcher(Protocol):
+    @staticmethod
     async def propose(
-        self,
         *,
         columns: list[str],
         concepts: list[CanonicalConcept],
@@ -133,8 +133,8 @@ class DeterministicMatcher:
     Each column maps to at most one concept — the highest-scoring one.
     """
 
+    @staticmethod
     async def propose(
-        self,
         *,
         columns: list[str],
         concepts: list[CanonicalConcept],

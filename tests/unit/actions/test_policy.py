@@ -58,13 +58,16 @@ async def test_override_wins():
 @pytest.mark.asyncio
 async def test_required_tool_cannot_override_to_auto(monkeypatch):
     class _Db:
-        async def execute(self, *args, **kwargs):
+        @staticmethod
+        async def execute(*args, **kwargs):
             return _FakeResult(None)
 
-        def add(self, row):
+        @staticmethod
+        def add(row):
             return None
 
-        async def flush(self):
+        @staticmethod
+        async def flush():
             return None
 
     monkeypatch.setattr(

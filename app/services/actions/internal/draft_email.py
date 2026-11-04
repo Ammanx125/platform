@@ -63,8 +63,8 @@ class DraftEmailAction:
     parameters_model = DraftEmailParams
     validators = [validate_evidence_cited, validate_body_not_empty]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: DraftEmailParams,
@@ -140,8 +140,8 @@ class DraftEmailAction:
             "account_id": str(account.id),
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: DraftEmailParams,

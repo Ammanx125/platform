@@ -47,8 +47,8 @@ class ListInboxAction:
     parameters_model = ListInboxParams
     validators: list = []
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: ListInboxParams,
@@ -112,8 +112,8 @@ class ListInboxAction:
             "emails": rows,
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: ListInboxParams,

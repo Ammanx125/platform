@@ -48,8 +48,8 @@ class SupplierDetailAction:
     parameters_model = SupplierDetailParams
     validators = [validate_supplier_reference]
 
+    @staticmethod
     async def execute(
-        self,
         *,
         db: Any,
         payload: SupplierDetailParams,
@@ -84,8 +84,8 @@ class SupplierDetailAction:
             "source_type": row.source_type,
         })
 
+    @staticmethod
     async def verify(
-        self,
         *,
         db: Any,
         payload: SupplierDetailParams,
