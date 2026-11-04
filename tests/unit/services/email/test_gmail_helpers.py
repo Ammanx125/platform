@@ -4,6 +4,8 @@ from __future__ import annotations
 import base64
 from datetime import UTC, datetime
 
+from httpx import Request, Response
+
 from app.services.email.base import OAuthTokenSet
 from app.services.email.gmail import (
     GmailProvider,
@@ -79,13 +81,9 @@ def test_decode_body_empty():
 def test_revoke_tokens_posts_refresh_token_to_google(monkeypatch):
     calls = []
 
-    class Response:
-        def raise_for_status(self):
-            pass
-
     def fake_post(url, *, params, timeout):
         calls.append((url, params, timeout))
-        return Response()
+        return Response(200, request=Request("POST", url))
 
     monkeypatch.setattr("app.services.email.gmail.httpx.post", fake_post)
     tokens = OAuthTokenSet(

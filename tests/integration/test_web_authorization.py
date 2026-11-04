@@ -105,14 +105,13 @@ async def test_cookie_authenticated_api_writes_require_csrf_by_default(
     client: AsyncClient, two_tenants: dict
 ) -> None:
     from httpx import ASGITransport
-    from httpx import AsyncClient as BareAsyncClient
 
     from app.main import app
 
     await _login(client, two_tenants["email_a"], "Passw0rd")
     action_id = uuid.uuid4()
 
-    async with BareAsyncClient(
+    async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
         cookies=client.cookies,

@@ -77,15 +77,8 @@ class SupplierDetailAction:
         })
 
     @staticmethod
-    async def verify(
-        *,
-        db: Any,
-        payload: SupplierDetailParams,
-        context: ActionContext,
-        result: ActionResult,
-    ) -> VerificationOutcome:
+    async def verify(**_kwargs: Any) -> VerificationOutcome:
         """Read-only tools produce no side effect; verification is trivial."""
-        del db, payload, context, result
         return VerificationOutcome(verified=True, detail={"readonly": True})
 
 
