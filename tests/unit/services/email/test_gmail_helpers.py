@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime
 
+from app.services.email.base import OAuthTokenSet
 from app.services.email.gmail import (
+    GmailProvider,
     _decode_body,
     _parse_address,
     _parse_address_list,
@@ -71,3 +74,33 @@ def test_decode_body_multipart_prefers_plain():
 
 def test_decode_body_empty():
     assert _decode_body({"mimeType": "text/plain"}) == ""
+
+
+def test_revoke_tokens_posts_refresh_token_to_google(monkeypatch):
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, *, params, timeout):
+        calls.append((url, params, timeout))
+        return Response()
+
+    monkeypatch.setattr("app.services.email.gmail.httpx.post", fake_post)
+    tokens = OAuthTokenSet(
+        access_token="access-token",
+        refresh_token="refresh-token",
+        expires_at=datetime.now(UTC),
+        scope="gmail.compose",
+    )
+
+    GmailProvider._revoke_sync(tokens)
+
+    assert calls == [
+        (
+            "https://oauth2.googleapis.com/revoke",
+            {"token": "refresh-token"},
+            15,
+        )
+    ]

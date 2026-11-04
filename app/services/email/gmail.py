@@ -25,6 +25,8 @@ from email.mime.text import MIMEText
 from email.utils import getaddresses
 from typing import Any
 
+import httpx
+
 from app.core.config import settings
 from app.services.email.base import (
     DraftResult,
@@ -259,16 +261,16 @@ class GmailProvider:
 
     @staticmethod
     def _revoke_sync(tokens: OAuthTokenSet) -> None:
-        import urllib.request
-
         target = tokens.refresh_token or tokens.access_token
         if not target:
             return
-        req = urllib.request.Request(
-            f"{_REVOKE_URI}?token={target}", method="POST"
-        )
         try:
-            urllib.request.urlopen(req, timeout=15).read()
+            response = httpx.post(
+                _REVOKE_URI,
+                params={"token": target},
+                timeout=15,
+            )
+            response.raise_for_status()
         except Exception:  # noqa: BLE001
             # Revocation is best-effort. Token expiry bounds the damage.
             return

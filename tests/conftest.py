@@ -28,8 +28,24 @@ async def reset_rate_limits() -> AsyncGenerator[None]:
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
-        yield c
+
+    async def attach_csrf_header(request) -> None:
+        if request.method.upper() in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+            return
+        if not request.url.path.startswith("/api/v1/"):
+            return
+        if settings.csrf_header_name in request.headers:
+            return
+        token = client.cookies.get(settings.csrf_cookie_name)
+        if token:
+            request.headers[settings.csrf_header_name] = token
+
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        event_hooks={"request": [attach_csrf_header]},
+    ) as client:
+        yield client
 
 
 @pytest_asyncio.fixture(autouse=True)

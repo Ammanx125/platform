@@ -14,6 +14,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.db.models.user import User
 from app.db.session import get_db
 
@@ -30,9 +31,10 @@ async def require_html_user(
     exception caught by a handler in main.py that redirects.
     """
     try:
-        return await get_current_user(db=db, access_token=request.cookies.get(
-            "sansa_access"
-        ))
+        return await get_current_user(
+            db=db,
+            access_token=request.cookies.get(settings.access_cookie_name),
+        )
     except HTTPException:
         raise _RedirectToLogin() from None
 

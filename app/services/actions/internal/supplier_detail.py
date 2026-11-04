@@ -14,6 +14,7 @@ from app.services.actions.base import (
     ActionContext,
     ActionResult,
     ValidationOutcome,
+    Validator,
     VerificationOutcome,
 )
 from app.services.actions.registry import register
@@ -26,18 +27,9 @@ class SupplierDetailParams(BaseModel):
 
 
 def validate_supplier_reference(
-    payload: SupplierDetailParams,
-    context: ActionContext,
+    _payload: SupplierDetailParams,
+    _context: ActionContext,
 ) -> ValidationOutcome:
-    """
-    The supplier_id is expected to be a UUID; Pydantic handles the format.
-    This validator confirms the caller isn't asking for something outside
-    their tenant — but that check requires DB access, so it lives in
-    execute(). What we check here is only the shape.
-    """
-    # The param type already enforced the format. This validator exists as
-    # a named slot where a future business rule (e.g. only suppliers with
-    # an active contract) can live without touching execute().
     return ValidationOutcome(passed=True, detail={})
 
 
@@ -46,7 +38,7 @@ class SupplierDetailAction:
     description = "Return details for a single supplier by id."
     risk_level = RISK_READ
     parameters_model = SupplierDetailParams
-    validators = [validate_supplier_reference]
+    validators: list[Validator] = [validate_supplier_reference]
 
     @staticmethod
     async def execute(
@@ -93,6 +85,7 @@ class SupplierDetailAction:
         result: ActionResult,
     ) -> VerificationOutcome:
         """Read-only tools produce no side effect; verification is trivial."""
+        del db, payload, context, result
         return VerificationOutcome(verified=True, detail={"readonly": True})
 
 

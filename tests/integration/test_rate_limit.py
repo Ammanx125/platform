@@ -25,6 +25,22 @@ async def test_login_rate_limit(client: AsyncClient) -> None:
     assert 429 in statuses, f"expected a 429 in {statuses}"
 
 
+@pytest.mark.asyncio
+async def test_html_login_rate_limit(client: AsyncClient) -> None:
+    statuses = []
+    for _ in range(15):
+        response = await client.post(
+            "/login",
+            data={
+                "email": "nobody@nowhere.example",
+                "password": "wrong123",
+            },
+        )
+        statuses.append(response.status_code)
+
+    assert 429 in statuses, f"expected a 429 in {statuses}"
+
+
 def test_production_requires_redis() -> None:
     with pytest.raises(ValidationError, match="REDIS_URL is required"):
         Settings.model_validate({

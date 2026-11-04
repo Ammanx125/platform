@@ -42,7 +42,7 @@ class SendEmailParams(BaseModel):
 
 
 def validate_draft_id_shape(
-    payload: SendEmailParams, context: ActionContext
+    payload: SendEmailParams, _context: ActionContext
 ) -> ValidationOutcome:
     if "/" in payload.draft_id or ".." in payload.draft_id:
         return ValidationOutcome(

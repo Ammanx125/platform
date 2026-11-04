@@ -26,7 +26,6 @@ class _DBStub:
 
 
 def _points(values: list[float]) -> list[TimeSeriesPoint]:
-    import uuid
     base = datetime(2026, 1, 1, tzinfo=UTC)
     return [
         TimeSeriesPoint(

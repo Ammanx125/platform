@@ -19,6 +19,7 @@ from starlette.responses import Response
 from app.api.v1 import api_router
 from app.core.body_limit import BodyLimitMiddleware
 from app.core.config import settings
+from app.core.csrf import CookieCSRFMiddleware
 from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.web.deps import (
@@ -73,6 +74,7 @@ app.add_middleware(
         ("/ask", settings.max_form_body_bytes),
     ],
 )
+app.add_middleware(CookieCSRFMiddleware)
 
 
 @app.exception_handler(_RedirectToLogin)

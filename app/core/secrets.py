@@ -67,7 +67,7 @@ def resolve(ref: str, *, tenant_id: str | UUID | None = None) -> str:
 
     for key in keys:
         value = os.environ.get(key)
-        if value not in (None, ""):
+        if value is not None and value != "":
             return value
 
     tried = ", ".join(keys)

@@ -111,6 +111,68 @@ def _score_match(
     return whole
 
 
+def _concept_candidates(
+    concepts: list[CanonicalConcept],
+) -> list[tuple[CanonicalConcept, list[tuple[str, frozenset[str]]]]]:
+    candidates_by_concept = []
+    for concept in concepts:
+        seen: set[str] = set()
+        candidates: list[tuple[str, frozenset[str]]] = []
+        for raw in [concept.display_name, *(concept.synonyms or [])]:
+            candidate = normalize_column_name(raw)
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            candidates.append((candidate, frozenset(_normalized_parts(raw))))
+        candidates_by_concept.append((concept, candidates))
+    return candidates_by_concept
+
+
+def _proposal_for_column(
+    column: str,
+    candidates_by_concept: list[
+        tuple[CanonicalConcept, list[tuple[str, frozenset[str]]]]
+    ],
+) -> MappingProposal | None:
+    normalized = normalize_column_name(column)
+    if not normalized:
+        return None
+
+    column_parts = _normalized_parts(column)
+    best_score = 0.0
+    best_concept: CanonicalConcept | None = None
+    best_matched: str | None = None
+    for concept, candidates in candidates_by_concept:
+        for candidate, candidate_parts in candidates:
+            score = _score_match(
+                normalized, column_parts, candidate, candidate_parts
+            )
+            if score > best_score:
+                best_score = score
+                best_concept = concept
+                best_matched = candidate
+
+    if best_concept is None or best_matched is None or best_score < _WEAK:
+        return None
+
+    if best_score == _EXACT:
+        method = "exact"
+    elif best_score >= _STRONG:
+        method = "fuzzy_strong"
+    else:
+        method = "fuzzy_weak"
+    return MappingProposal(
+        source_column=column,
+        canonical_concept_key=best_concept.key,
+        confidence=round(best_score / 100.0, 4),
+        rationale={
+            "method": method,
+            "matched": best_matched,
+            "score": round(best_score, 2),
+        },
+    )
+
+
 class DeterministicMatcher:
     """
     Deterministic matcher: exact, then fuzzy, then give up.
@@ -139,63 +201,12 @@ class DeterministicMatcher:
         columns: list[str],
         concepts: list[CanonicalConcept],
     ) -> list[MappingProposal]:
-        proposals: list[MappingProposal] = []
-
-        # A candidate is matched both as a normalized string and as a set of
-        # its own parts, so 'unit price' can match 'unit_price' as a whole
-        # rather than only via its synonym list.
-        concept_candidates: list[tuple[CanonicalConcept, list[tuple[str, frozenset[str]]]]] = []
-        for c in concepts:
-            raw_candidates = [c.display_name, *(c.synonyms or [])]
-            seen: set[str] = set()
-            deduped: list[tuple[str, frozenset[str]]] = []
-            for raw in raw_candidates:
-                cand = normalize_column_name(raw)
-                if not cand or cand in seen:
-                    continue
-                seen.add(cand)
-                deduped.append((cand, frozenset(_normalized_parts(raw))))
-            concept_candidates.append((c, deduped))
-
-        for col in columns:
-            norm = normalize_column_name(col)
-            if not norm:
-                continue
-            exact_parts = _normalized_parts(col)
-
-            best_score: float = 0.0
-            best_concept: CanonicalConcept | None = None
-            best_matched: str | None = None
-
-            for concept, candidates in concept_candidates:
-                for cand, cand_parts in candidates:
-                    score = _score_match(norm, exact_parts, cand, cand_parts)
-                    if score > best_score:
-                        best_score = score
-                        best_concept = concept
-                        best_matched = cand
-
-            if best_concept is None or best_matched is None:
-                continue
-            if best_score < _WEAK:
-                continue
-
-            if best_score == _EXACT:
-                method = "exact"
-            elif best_score >= _STRONG:
-                method = "fuzzy_strong"
-            else:
-                method = "fuzzy_weak"
-
-            proposals.append(MappingProposal(
-                source_column=col,
-                canonical_concept_key=best_concept.key,
-                confidence=round(best_score / 100.0, 4),
-                rationale={
-                    "method": method,
-                    "matched": best_matched,
-                    "score": round(best_score, 2),
-                },
-            ))
-
-        return proposals
+        candidates_by_concept = _concept_candidates(concepts)
+        return [
+            proposal
+            for column in columns
+            if (
+                proposal := _proposal_for_column(column, candidates_by_concept)
+            )
+            is not None
+        ]

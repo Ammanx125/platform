@@ -350,22 +350,11 @@ class SliceResult:
             print("  Some steps failed.")
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--email", default="admin@demo.com")
-    parser.add_argument("--password", default="Sansa2026")
-    parser.add_argument("--tenant-slug")
-    parser.add_argument(
-        "--data-dir", default="data/demo", type=Path,
-        help="Where to write generated sample data."
-    )
-    args = parser.parse_args()
-
-    result = SliceResult()
-    api = SansaAPI(args.base_url)
-
-    # ---- 1. Login ----
+def _login(
+    api: SansaAPI,
+    args: argparse.Namespace,
+    result: SliceResult,
+) -> bool:
     log.step_header("Login")
     try:
         me = api.login(
@@ -378,20 +367,16 @@ def main() -> int:
     except Exception as exc:
         log.fail(f"login failed: {exc}")
         result.record("login", False, str(exc))
-        result.print_summary()
-        return 1
+        return False
+    return True
 
-    # ---- 2. Generate data ----
-    log.step_header("Generate synthetic procurement data")
-    rows = generate_procurement_rows()
-    csv_path = args.data_dir / "procurement_sample.csv"
-    xlsx_path = args.data_dir / "procurement_sample.xlsx"
-    write_csv(csv_path, rows)
-    write_xlsx(xlsx_path, rows)
-    log.ok(f"wrote {len(rows)} rows to {csv_path.name} and {xlsx_path.name}")
-    result.record("generate_data", True, f"{len(rows)} rows")
 
-    # ---- 3. Create dataset ----
+def _create_dataset_and_ingest(
+    api: SansaAPI,
+    *,
+    xlsx_path: Path,
+    result: SliceResult,
+) -> tuple[str, str] | None:
     log.step_header("Create DataSource (excel)")
     try:
         dataset_name = f"Procurement Slice {uuid4().hex[:8]}"
@@ -402,10 +387,8 @@ def main() -> int:
     except Exception as exc:
         log.fail(f"create_dataset failed: {exc}")
         result.record("create_dataset", False, str(exc))
-        result.print_summary()
-        return 1
+        return None
 
-    # ---- 4. Upload ----
     log.step_header("Upload Excel file")
     try:
         job = api.upload(dataset_id=ds_id, path=xlsx_path)
@@ -415,10 +398,8 @@ def main() -> int:
     except Exception as exc:
         log.fail(f"upload failed: {exc}")
         result.record("upload", False, str(exc))
-        result.print_summary()
-        return 1
+        return None
 
-    # ---- 5. Wait for ingestion ----
     log.step_header("Wait for ingestion")
     try:
         job = api.wait_for_job(dataset_id=ds_id, job_id=job_id)
@@ -431,20 +412,27 @@ def main() -> int:
     except Exception as exc:
         log.fail(f"ingestion failed: {exc}")
         result.record("ingestion", False, str(exc))
-        result.print_summary()
-        return 1
+        return None
+    return ds_id, job_id
 
-    # ---- 6. Propose and confirm mappings ----
+
+def _confirm_mappings(
+    api: SansaAPI,
+    *,
+    dataset_id: str,
+    job_id: str,
+    result: SliceResult,
+) -> None:
     log.step_header("Semantic mapping")
     try:
-        proposed = api.propose_mappings(dataset_id=ds_id, job_id=job_id)
+        proposed = api.propose_mappings(dataset_id=dataset_id, job_id=job_id)
         log.ok(f"{len(proposed)} mappings proposed")
         # Confirm every proposed mapping that has a concept
-        all_mappings = api.list_mappings(dataset_id=ds_id)
+        all_mappings = api.list_mappings(dataset_id=dataset_id)
         confirmed = 0
         for m in all_mappings:
             if m["status"] == "proposed":
-                api.confirm_mapping(dataset_id=ds_id, mapping_id=m["id"])
+                api.confirm_mapping(dataset_id=dataset_id, mapping_id=m["id"])
                 confirmed += 1
         log.ok(f"{confirmed} mappings confirmed")
         result.record("mapping", True, f"{confirmed} confirmed")
@@ -452,7 +440,8 @@ def main() -> int:
         log.fail(f"mapping failed: {exc}")
         result.record("mapping", False, str(exc))
 
-    # ---- 7. KPI: total spend ----
+
+def _run_kpi(api: SansaAPI, result: SliceResult) -> None:
     log.step_header("KPI: procurement.total_spend")
     try:
         kpi = api.kpi_value("procurement.total_spend")
@@ -463,7 +452,8 @@ def main() -> int:
         log.fail(f"KPI failed: {exc}")
         result.record("kpi_total_spend", False, str(exc))
 
-    # ---- 8. Anomaly detection ----
+
+def _run_anomaly_detection(api: SansaAPI, result: SliceResult) -> None:
     log.step_header("Anomaly detector: procurement.purchase_price_spikes")
     try:
         anomalies = api.run_anomaly_detector(
@@ -480,7 +470,8 @@ def main() -> int:
         log.fail(f"anomaly detection failed: {exc}")
         result.record("anomalies", False, str(exc))
 
-    # ---- 9. Ask Sansa ----
+
+def _ask_sansa(api: SansaAPI, result: SliceResult) -> str | None:
     log.step_header(
         "Ask Sansa: 'Why did procurement cost increase this quarter, "
         "and what should we do?'"
@@ -503,10 +494,16 @@ def main() -> int:
     except Exception as exc:
         log.fail(f"ask failed: {exc}")
         result.record("ask", False, str(exc))
-        result.print_summary()
-        return 1
+        return None
+    return decision_id
 
-    # ---- 10. Approve a proposed action (if any) ----
+
+def _approve_proposed_action(
+    api: SansaAPI,
+    *,
+    decision_id: str,
+    result: SliceResult,
+) -> None:
     log.step_header("Action approval (if any)")
     try:
         actions = api.list_actions_for_decision(decision_id)
@@ -535,7 +532,8 @@ def main() -> int:
         log.fail(f"action approval failed: {exc}")
         result.record("action", False, str(exc))
 
-    # ---- 11. Audit trail ----
+
+def _fetch_audit_trail(api: SansaAPI, result: SliceResult) -> None:
     log.step_header("Audit trail")
     try:
         events = api.list_audit()
@@ -546,6 +544,57 @@ def main() -> int:
     except Exception as exc:
         log.fail(f"audit fetch failed: {exc}")
         result.record("audit", False, str(exc))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--email", default="admin@demo.com")
+    parser.add_argument("--password", default="Sansa2026")
+    parser.add_argument("--tenant-slug")
+    parser.add_argument(
+        "--data-dir", default="data/demo", type=Path,
+        help="Where to write generated sample data."
+    )
+    args = parser.parse_args()
+
+    result = SliceResult()
+    api = SansaAPI(args.base_url)
+    if not _login(api, args, result):
+        result.print_summary()
+        return 1
+
+    log.step_header("Generate synthetic procurement data")
+    rows = generate_procurement_rows()
+    csv_path = args.data_dir / "procurement_sample.csv"
+    xlsx_path = args.data_dir / "procurement_sample.xlsx"
+    write_csv(csv_path, rows)
+    write_xlsx(xlsx_path, rows)
+    log.ok(f"wrote {len(rows)} rows to {csv_path.name} and {xlsx_path.name}")
+    result.record("generate_data", True, f"{len(rows)} rows")
+
+    dataset = _create_dataset_and_ingest(
+        api, xlsx_path=xlsx_path, result=result
+    )
+    if dataset is None:
+        result.print_summary()
+        return 1
+    dataset_id, job_id = dataset
+
+    _confirm_mappings(
+        api,
+        dataset_id=dataset_id,
+        job_id=job_id,
+        result=result,
+    )
+    _run_kpi(api, result)
+    _run_anomaly_detection(api, result)
+    decision_id = _ask_sansa(api, result)
+    if decision_id is None:
+        result.print_summary()
+        return 1
+    _approve_proposed_action(api, decision_id=decision_id, result=result)
+    _fetch_audit_trail(api, result)
 
     result.print_summary()
     return 0 if result.all_ok() else 1

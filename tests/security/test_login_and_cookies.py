@@ -2,6 +2,8 @@
 import pytest
 from httpx import AsyncClient
 
+from app.core.config import settings
+
 
 @pytest.mark.asyncio
 async def test_login_sets_cookies(client: AsyncClient, two_tenants: dict) -> None:
@@ -10,9 +12,27 @@ async def test_login_sets_cookies(client: AsyncClient, two_tenants: dict) -> Non
         json={"email": two_tenants["email_a"], "password": two_tenants["password"]},
     )
     assert r.status_code == 200
-    assert "sansa_access" in r.cookies
-    assert "sansa_refresh" in r.cookies
-    assert "sansa_csrf" in r.cookies
+    assert settings.access_cookie_name in r.cookies
+    assert settings.refresh_cookie_name in r.cookies
+    assert settings.csrf_cookie_name in r.cookies
+
+
+@pytest.mark.asyncio
+async def test_html_authentication_uses_configured_access_cookie(
+    client: AsyncClient,
+    two_tenants: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "access_cookie_name", "custom_access")
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={"email": two_tenants["email_a"], "password": two_tenants["password"]},
+    )
+    assert response.status_code == 200
+    assert "custom_access" in response.cookies
+
+    page = await client.get("/approvals")
+    assert page.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -99,10 +119,10 @@ async def test_web_logout_requires_csrf(client: AsyncClient, two_tenants: dict) 
     rejected = await client.post("/logout")
     assert rejected.status_code == 403
 
-    csrf_token = client.cookies.get("sansa_csrf")
+    csrf_token = client.cookies.get(settings.csrf_cookie_name)
     assert csrf_token is not None
     accepted = await client.post(
-        "/logout", headers={"X-CSRF-Token": csrf_token}
+        "/logout", headers={settings.csrf_header_name: csrf_token}
     )
     assert accepted.status_code == 303
     assert accepted.headers["location"] == "/login"

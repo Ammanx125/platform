@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.security import generate_refresh_token, hash_password, hash_refresh_token
 from app.db.models.agent import Agent
 from app.db.models.dataset import DataSource
@@ -22,8 +23,8 @@ from app.services.agents.service import AgentError
 
 
 def _csrf(client: AsyncClient) -> dict[str, str]:
-    token = client.cookies.get("sansa_csrf")
-    return {"X-CSRF-Token": token} if token else {}
+    token = client.cookies.get(settings.csrf_cookie_name)
+    return {settings.csrf_header_name: token} if token else {}
 
 
 async def _login(client: AsyncClient, email: str, password: str) -> None:
@@ -81,18 +82,63 @@ async def test_browser_authorization_requires_csrf(
         "scope": {"read": True},
     }
 
+    csrf_token = client.cookies.get(settings.csrf_cookie_name)
+    client.cookies.delete(settings.csrf_cookie_name)
     no_csrf = await client.post(
         f"/api/v1/browser/sources/{source_id}/authorization",
         json=payload,
     )
     assert no_csrf.status_code == 403
 
+    assert csrf_token is not None
+    client.cookies.set(settings.csrf_cookie_name, csrf_token)
     ok = await client.post(
         f"/api/v1/browser/sources/{source_id}/authorization",
         json=payload,
         headers=_csrf(client),
     )
     assert ok.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_cookie_authenticated_api_writes_require_csrf_by_default(
+    client: AsyncClient, two_tenants: dict
+) -> None:
+    from httpx import ASGITransport
+    from httpx import AsyncClient as BareAsyncClient
+
+    from app.main import app
+
+    await _login(client, two_tenants["email_a"], "Passw0rd")
+    action_id = uuid.uuid4()
+
+    async with BareAsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        cookies=client.cookies,
+    ) as bare_client:
+        rejected = await bare_client.post(f"/api/v1/actions/{action_id}/approve")
+        assert rejected.status_code == 403
+
+        csrf_token = client.cookies.get(settings.csrf_cookie_name)
+        assert csrf_token
+        allowed_past_csrf = await bare_client.post(
+            f"/api/v1/actions/{action_id}/approve",
+            headers={settings.csrf_header_name: csrf_token},
+        )
+        assert allowed_past_csrf.status_code == 409
+
+        webhook = await bare_client.post(
+            "/api/v1/webhooks/invalid-token",
+            content=b"{}",
+        )
+        assert webhook.status_code == 401
+
+        agent = await bare_client.post(
+            f"/api/v1/agents/{uuid.uuid4()}/heartbeat",
+            headers={"Authorization": "Bearer invalid-agent-token"},
+        )
+        assert agent.status_code == 401
 
 
 # ---------- RBAC on /ask ----------

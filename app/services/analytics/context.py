@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.dataset import StagedRow
 from app.db.models.semantic import CanonicalConcept, SemanticMapping
+from app.services.analytics.periods import Period
 
 
 def _to_float(value: Any) -> float | None:
@@ -130,7 +131,7 @@ class EvaluationContext:
         self._concepts = concepts or {}
 
     # The resolved window, attached by load() so callers can report it.
-    period = None
+    period: Period | None = None
 
     @classmethod
     async def load(
