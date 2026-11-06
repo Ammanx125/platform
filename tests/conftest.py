@@ -1,4 +1,5 @@
 from __future__ import annotations
+# This file is part of the LLM Engine project.
 
 from collections.abc import AsyncGenerator
 
